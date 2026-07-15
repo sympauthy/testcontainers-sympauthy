@@ -7,12 +7,16 @@ repositories {
     mavenCentral()
 }
 
+// The Testcontainers version we build and test against.
 val testcontainersVersion = "2.0.5"
 val junitVersion = "5.11.4"
 
 dependencies {
-    // Exposed to consumers: they write tests against the Testcontainers API.
-    api("org.testcontainers:testcontainers:$testcontainersVersion")
+    // The minimum Testcontainers version exposed to consumers. Declaring the `api` dependency
+    // against the lowest supported release (rather than the one we test with) widens
+    // compatibility: Gradle resolves to the highest requested version, so consumers already on
+    // 2.0.0+ can use this library without being forced up to a newer Testcontainers.
+    api("org.testcontainers:testcontainers:2.0.0")
 
     testImplementation(platform("org.junit:junit-bom:$junitVersion"))
     testImplementation("org.testcontainers:testcontainers-junit-jupiter:$testcontainersVersion")
