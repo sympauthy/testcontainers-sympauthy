@@ -38,7 +38,21 @@ tasks.withType<Javadoc>().configureEach {
 }
 
 tasks.named<Test>("test") {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags("integration")
+    }
+}
+
+// Container-starting tests (require Docker). Run with: ./gradlew integrationTest
+tasks.register<Test>("integrationTest") {
+    description = "Runs integration tests that start real containers (requires Docker)."
+    group = "verification"
+    useJUnitPlatform {
+        includeTags("integration")
+    }
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    shouldRunAfter("test")
 }
 
 publishing {
