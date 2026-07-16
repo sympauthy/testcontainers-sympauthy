@@ -1,0 +1,82 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A single-module Testcontainers module that runs [SympAuthy](https://sympauthy.github.io/) — a
+self-hosted OAuth 2.1 / OpenID Connect authorization server — from Java tests. Consumers add it as a
+library dependency and drive `SympauthyContainer` from their own test suites. The whole module is
+essentially one public class: `src/main/java/com/sympauthy/testcontainers/SympauthyContainer.java`.
+
+## Commands
+
+Gradle (Kotlin DSL), Gradle wrapper 9.6.1, Java 17 bytecode target.
+
+```bash
+./gradlew test                              # fast, Docker-free unit tests (src/test/java)
+./gradlew integrationTest                   # container-starting tests, REQUIRES Docker (src/integrationTest/java)
+./gradlew build                             # compile + unit tests + sources/javadoc jars (does NOT run integrationTest)
+./gradlew test --tests "SympauthyContainerTest.isMinimalByDefault"   # a single unit test
+./gradlew integrationTest --tests "NestedConfigMapIT"                # a single integration test
+```
+
+`integrationTest` is a separate source set, not part of `check`/`build` — run it explicitly, and only
+with a Docker (or Podman/Colima/etc.) engine available.
+
+## Two source sets, two kinds of test
+
+- **`src/test/java` (unit, no Docker).** These call the Docker-free `configure()` directly and assert
+  on the resulting `getCommandParts()` (program arguments) and `getEnv()` (environment). They never
+  start a container. Note: `getDockerImageName()` resolves/pulls the image in Testcontainers 2.x, so
+  tests assert the default image via the `DEFAULT_IMAGE_NAME`/`DEFAULT_TAG` constants instead of calling it.
+- **`src/integrationTest/java` (IT, needs Docker).** Each scenario is a `*IT` subclass of
+  `AbstractSympauthyContainerIT`. They boot a real container and assert configuration actually took
+  effect by observing the running server, not just that it booted. When adding an IT, follow this
+  pattern: subclass, boot, and assert on a signal that is present *only* when the config under test was
+  genuinely applied. Pick whatever signal best proves the path you're exercising — the existing
+  scenarios watch for the opt-in `email_verified` claim in the discovery document (`EMAIL_CLAIM_MARKER`,
+  via the shared `fetchDiscovery` helper), but other cases may inspect different endpoints, response
+  fields, or behaviors. Add shared helpers to `AbstractSympauthyContainerIT` as new signals arise.
+
+## Architecture of `SympauthyContainer`
+
+SympAuthy is heavily configuration-driven, so the container avoids a typed method per settings section.
+Instead it exposes the full surface through generic escape hatches that map onto the **three Micronaut
+configuration mechanisms** the server understands. When adding config capability, fit it into one of
+these rather than inventing a new channel:
+
+1. **Program arguments** (`-<key>=<value>`, appended to the entrypoint via `withCommand`) —
+   `withProperty` / `withProperties` / `withDatasource`. Backed by a `LinkedHashMap`, so the last
+   value per key wins. Best for targeted scalar overrides.
+2. **Environment profiles** (`MICRONAUT_ENVIRONMENTS`) — `withEnvironments(...)` *replaces* the set
+   (defaults to `default` alone). Profiles: `default`, `by-mail`, `admin`, providers like `google`.
+3. **External config files** (`MICRONAUT_CONFIG_FILES`) — `withConfigFile`, `withConfigContent`,
+   `withYamlConfig`, `withJsonConfig`, and `withConfig(Map)`. Preserves nested lists/objects (`rules`,
+   providers, clients) that flatten badly as indexed program arguments. Later files override earlier ones.
+
+Key invariants to preserve when editing:
+
+- **Everything is deferred to `configure()`.** The `with*` methods only accumulate into fields
+  (`properties`, `environments`, `configFilePaths`); `configure()` (called by Testcontainers right
+  before start, and directly by unit tests) materializes them into env vars and the command line.
+- **The container owns `auth.issuer` and `urls.root`.** `configure()` applies these pins *last* so they
+  always beat caller-supplied values — the issuer must stay host-reachable.
+- **Host port is pinned up front.** The constructor allocates a free host port (`findFreePort`) and
+  `addFixedExposedPort`s it, because the issuer/discovery URL is baked into startup config and must be
+  known before the container starts. This is also what lets `getBaseUrl()`/`getIssuerUrl()` be stable
+  and callable before `start()`. Multiple instances get distinct ports and can run in parallel.
+- **Overall precedence (highest first):** container-managed issuer/root URL > program-argument
+  overrides > `MICRONAUT_ENVIRONMENTS` profiles > mounted config files > image's bundled defaults.
+- **No JSON dependency.** `withConfig(Map)` serializes via the in-house `toJson`/`appendJson` (Maps →
+  objects, Lists → arrays, Number/Boolean → literals, everything else quoted). Don't add a JSON library
+  to satisfy this; extend the serializer.
+- **Default image is `ghcr.io/sympauthy/sympauthy-nightly:latest`** (only a nightly is published). The
+  constructor `assertCompatibleWith`s this, so a non-nightly image reference is rejected.
+
+## Dependency versioning
+
+`build.gradle.kts` deliberately declares the `api` Testcontainers dependency against the **lowest**
+supported release (`2.0.0`) while building/testing against a newer one (`testcontainersVersion`).
+Gradle resolves to the highest requested version, so consumers already on 2.0.0+ aren't forced to
+upgrade. The module is Testcontainers **2.x only** (2.0 relocated packages and dropped JUnit 4).
