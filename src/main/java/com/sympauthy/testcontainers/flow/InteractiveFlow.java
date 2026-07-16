@@ -245,7 +245,11 @@ public final class InteractiveFlow implements AutoCloseable {
                     failure = new FlowException("Flow was redirected to the error page (" + query + ")");
                     respond(exchange, 200, "error");
                 }
-                default -> respond(exchange, 404, "unknown flow page");
+                default -> {
+                    failure = new UnsupportedFlowStepException(
+                            "SympAuthy redirected to a flow page this frontend does not support: " + path);
+                    respond(exchange, 404, "unsupported flow page");
+                }
             }
         } catch (RuntimeException e) {
             failure = e;

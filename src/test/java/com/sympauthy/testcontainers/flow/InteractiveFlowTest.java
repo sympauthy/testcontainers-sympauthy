@@ -98,6 +98,22 @@ class InteractiveFlowTest {
     }
 
     @Test
+    void failsWhenSympAuthyRedirectsToAnUnsupportedPage() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlow flow = InteractiveFlow.forClient("test-app").withScopes("openid")) {
+
+            registerSympAuthy(sympauthy, flow);
+            // The authorization server sends the browser to a flow page the mock frontend does not serve.
+            sympauthy.route("GET", "/api/oauth2/authorize", request ->
+                    TestFlowServer.Response.seeOther(flow.frontendUrl() + "/mfa?state=" + FLOW_STATE));
+            attach(flow, sympauthy);
+
+            UnsupportedFlowStepException failure = assertThrows(UnsupportedFlowStepException.class, flow::run);
+            assertTrue(failure.getMessage().contains("/mfa"), failure.getMessage());
+        }
+    }
+
+    @Test
     void failsWhenNoAuthenticationHandlerIsConfigured() {
         try (TestFlowServer sympauthy = new TestFlowServer();
                 InteractiveFlow flow = InteractiveFlow.forClient("test-app").withScopes("openid")) {
