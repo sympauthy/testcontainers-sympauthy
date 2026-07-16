@@ -301,10 +301,14 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
 
     /**
      * Wires an {@link InteractiveFlow} mock frontend into this container: SympAuthy is pointed at the
-     * flow's pages and callback (the flow's {@code clients.<id>} and {@code flows.<id>} configuration
-     * is merged in), and the flow is told this container's URLs so {@link InteractiveFlow#run()} can
-     * drive it after {@link #start()}. Configure the authentication method (e.g. password) and claims
-     * separately, as usual.
+     * flow's pages and callback, and the flow is told this container's URLs so
+     * {@link InteractiveFlow#run()} can drive it after {@link #start()}. Configure the authentication
+     * method (e.g. password) and claims separately, as usual.
+     *
+     * <p>The flow's {@code clients.<id>} and {@code flows.<id>} config is applied via
+     * {@link #withProperties(Map)} (program-argument overrides), so it takes precedence over any
+     * client/flow config the caller supplied through config files or environment profiles and does not
+     * erase the rest of their configuration.
      *
      * <p>Because the flow's page URLs must be baked into SympAuthy's startup configuration, create the
      * flow (with {@link InteractiveFlow#forClient(String)}) <em>before</em> calling this.
@@ -314,7 +318,7 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
      */
     public SympauthyContainer withFlow(InteractiveFlow flow) {
         flow.attach(getBaseUrl(), getOpenIdConfigurationUrl());
-        return withConfig(flow.containerConfig());
+        return withProperties(flow.containerProperties());
     }
 
     @Override

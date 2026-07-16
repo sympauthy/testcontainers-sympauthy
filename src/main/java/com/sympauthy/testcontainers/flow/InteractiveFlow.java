@@ -148,26 +148,32 @@ public final class InteractiveFlow implements AutoCloseable {
 
     /**
      * The {@code clients.<id>} + {@code flows.<id>} configuration that points SympAuthy at this mock
-     * frontend. {@link com.sympauthy.testcontainers.SympauthyContainer#withFlow(InteractiveFlow)}
-     * merges this into the container for you.
+     * frontend, as flat Micronaut property keys (list elements use {@code [i]} indices).
+     * {@link com.sympauthy.testcontainers.SympauthyContainer#withFlow(InteractiveFlow)} applies these
+     * as program-argument overrides, so they win over any client/flow config the caller supplied via
+     * config files or environment profiles, without disturbing the rest of it.
      */
-    public Map<String, Object> containerConfig() {
-        Map<String, Object> client = new LinkedHashMap<>();
-        client.put("public", true);
-        client.put("authorizationFlow", flowId);
-        client.put("allowed-grant-types", List.of("authorization_code"));
-        client.put("allowed-scopes", List.copyOf(scopes));
-        client.put("allowed-redirect-uris", List.of(redirectUri()));
+    public Map<String, String> containerProperties() {
+        Map<String, String> properties = new LinkedHashMap<>();
 
-        Map<String, Object> flow = new LinkedHashMap<>();
-        flow.put("type", "web");
-        flow.put("sign-in", pageUrl("sign-in"));
-        flow.put("sign-up", pageUrl("sign-up"));
-        flow.put("collect-claims", pageUrl("collect-claims"));
-        flow.put("validate-claims", pageUrl("validate-claims"));
-        flow.put("error", pageUrl("error"));
+        String client = "clients." + clientId + ".";
+        properties.put(client + "public", "true");
+        properties.put(client + "authorizationFlow", flowId);
+        properties.put(client + "allowed-grant-types[0]", "authorization_code");
+        for (int i = 0; i < scopes.size(); i++) {
+            properties.put(client + "allowed-scopes[" + i + "]", scopes.get(i));
+        }
+        properties.put(client + "allowed-redirect-uris[0]", redirectUri());
 
-        return Map.of("clients", Map.of(clientId, client), "flows", Map.of(flowId, flow));
+        String flow = "flows." + flowId + ".";
+        properties.put(flow + "type", "web");
+        properties.put(flow + "sign-in", pageUrl("sign-in"));
+        properties.put(flow + "sign-up", pageUrl("sign-up"));
+        properties.put(flow + "collect-claims", pageUrl("collect-claims"));
+        properties.put(flow + "validate-claims", pageUrl("validate-claims"));
+        properties.put(flow + "error", pageUrl("error"));
+
+        return properties;
     }
 
     /** Connects this flow to a running SympAuthy instance. Called by {@code SympauthyContainer.withFlow}. */

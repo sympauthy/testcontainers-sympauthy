@@ -115,10 +115,11 @@ try (InteractiveFlow flow = InteractiveFlow.forClient("test-app")
 }
 ```
 
-`withFlow(flow)` merges the `clients.<id>` + `flows.<id>` config the flow generates and tells the flow
-the container's URLs; then `/authorize` redirects a redirect-following client through the mock
-frontend's pages to its `/callback`, which captures the code. Register only the pages a flow reaches —
-each callback is an independent functional interface:
+`withFlow(flow)` applies the `clients.<id>` + `flows.<id>` config the flow generates as
+program-argument overrides — so it takes precedence over any client/flow config you set elsewhere,
+without erasing the rest — and tells the flow the container's URLs. Then `/authorize` redirects a
+redirect-following client through the mock frontend's pages to its `/callback`, which captures the
+code. Register only the pages a flow reaches — each callback is an independent functional interface:
 
 | Callback | Purpose |
 | ------------------------------------------- | ------------------------------------------------------------------ |
