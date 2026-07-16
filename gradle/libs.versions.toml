@@ -7,6 +7,13 @@ testcontainers = "2.0.5"
 testcontainers-min = "2.0.0"
 junit = "5.11.4"
 slf4j = "2.0.16"
+# Test-only: parse/validate id_tokens in the integration test. Not shaded, not published.
+nimbus-jose-jwt = "10.9.1"
+# Tiny JSON parser used only by the flow client. It is shaded and relocated into our jar (see
+# build.gradle.kts), so it never appears on a consumer's classpath or in the published POM.
+minimal-json = "0.9.5"
+# Gradle Shadow fork: bundles + relocates minimal-json. 9.x requires Gradle >= 9.2 (we run 9.6.1).
+shadow = "9.5.1"
 
 [libraries]
 # `api` dependency: pinned to the minimum supported version on purpose (see testcontainers-min).
@@ -16,3 +23,8 @@ junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+minimal-json = { module = "com.eclipsesource.minimal-json:minimal-json", version.ref = "minimal-json" }
+nimbus-jose-jwt = { module = "com.nimbusds:nimbus-jose-jwt", version.ref = "nimbus-jose-jwt" }
+
+[plugins]
+shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
