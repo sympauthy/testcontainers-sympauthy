@@ -119,7 +119,10 @@ Key points when extending:
   `allowed-redirect-uris`) + a flow. SympAuthy's flow keys are **flat** and validated at startup:
   `flows.<id>.{type, sign-in, collect-claims, validate-claims, error}` must all be present, else the
   authorize endpoint returns HTTP 500 `config.invalid` (the container still boots — the readiness
-  printer only logs the errors).
+  printer only logs the errors). Those entries are UI paths resolved against the pinned `urls.root`,
+  so `/authorize` 303-redirects to `<root>/sign-in?state=<jwt>`; the runner extracts that `state` and
+  never loads the UI. Note the runner always reads the Flow API from the container's base URL, **not**
+  the redirect target — the Flow API is served by SympAuthy even when the flow UI lives elsewhere.
 
 ## Dependency versioning
 

@@ -37,6 +37,9 @@ class InteractiveFlowIT extends AbstractSympauthyContainerIT {
                     "allowed-grant-types", List.of("authorization_code"),
                     "allowed-scopes", List.of("openid"),
                     "allowed-redirect-uris", List.of(REDIRECT_URI))),
+            // The flow's UI paths resolve against the container's pinned urls.root, so /authorize
+            // 303-redirects to <root>/sign-in?state=<jwt>; the driver reads that state and calls the
+            // Flow API (on the container) directly, never loading these pages.
             "flows", Map.of("default", Map.of(
                     "type", "web",
                     "sign-in", "/sign-in",

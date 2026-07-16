@@ -93,7 +93,10 @@ about.
 
 ```java
 // A container configured for a password authorization-code flow: password auth, a public client,
-// and a flow definition (SympAuthy validates the flow's URLs at startup).
+// and a flow definition. The flow's sign-in/collect-claims/… entries are UI paths resolved against
+// the container's own root (urls.root, which the container pins): `/authorize` redirects there with
+// a state token, which the driver reads before calling the Flow API. SympAuthy just validates they
+// are present at startup — the driver never loads the pages.
 SympauthyContainer sympauthy = new SympauthyContainer().withConfig(Map.of(
     "auth",    Map.of("by-password", Map.of("enabled", true), "identifier-claims", List.of("email")),
     "claims",  Map.of("email", Map.of("enabled", true)),
