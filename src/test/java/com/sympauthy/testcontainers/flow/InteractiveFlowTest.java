@@ -35,9 +35,9 @@ class InteractiveFlowTest {
 
             List<FlowStep.Type> steps = new ArrayList<>();
             AuthorizationResult result = flow(server)
-                    .onSignUp(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
-                    .onClaims(claims -> Map.of("given_name", "Ada"))
-                    .onStep(step -> steps.add(step.type()))
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
+                    .withClaimsHandler(claims -> Map.of("given_name", "Ada"))
+                    .withStepListener(step -> steps.add(step.type()))
                     .run();
 
             assertEquals(CODE, result.code());
@@ -86,7 +86,7 @@ class InteractiveFlowTest {
                     TestFlowServer.Response.json(200, redirectTo(REDIRECT_URI + "?code=" + CODE + "&state=abc")));
 
             AuthorizationResult result = flow(server)
-                    .onSignUp(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
                     .run();
 
             assertEquals(CODE, result.code());
@@ -102,8 +102,8 @@ class InteractiveFlowTest {
 
             List<FlowStep.Type> steps = new ArrayList<>();
             AuthorizationResult result = flow(server)
-                    .onSignIn(configuration -> Credentials.of("ada@example.com", "pw"))
-                    .onStep(step -> steps.add(step.type()))
+                    .withSignInHandler(configuration -> Credentials.of("ada@example.com", "pw"))
+                    .withStepListener(step -> steps.add(step.type()))
                     .run();
 
             assertEquals(CODE, result.code());
@@ -126,7 +126,7 @@ class InteractiveFlowTest {
                     "{\"claims\":[{\"id\":\"given_name\",\"required\":true,\"name\":\"Given name\",\"type\":\"string\"}]}"));
 
             InteractiveFlow flow = flow(server)
-                    .onSignUp(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
 
             assertThrows(UnsupportedFlowStepException.class, flow::run);
         }
@@ -136,16 +136,16 @@ class InteractiveFlowTest {
     void failsWhenClientIdIsMissing() {
         assertThrows(IllegalStateException.class, () ->
                 InteractiveFlow.at("http://localhost:9")
-                        .redirectUri(REDIRECT_URI)
-                        .onSignUp(configuration -> Map.of())
+                        .withRedirectUri(REDIRECT_URI)
+                        .withSignUpHandler(configuration -> Map.of())
                         .run());
     }
 
     private InteractiveFlow flow(TestFlowServer server) {
         return InteractiveFlow.at(server.baseUrl())
-                .clientId(CLIENT_ID)
-                .redirectUri(REDIRECT_URI)
-                .scopes("openid", "profile", "email");
+                .withClientId(CLIENT_ID)
+                .withRedirectUri(REDIRECT_URI)
+                .withScopes("openid", "profile", "email");
     }
 
     private static void registerCommon(TestFlowServer server) {

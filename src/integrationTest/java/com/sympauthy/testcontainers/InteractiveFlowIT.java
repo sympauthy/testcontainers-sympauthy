@@ -53,11 +53,11 @@ class InteractiveFlowIT extends AbstractSympauthyContainerIT {
 
             List<FlowStep.Type> steps = new ArrayList<>();
             AuthorizationResult result = InteractiveFlow.against(sympauthy)
-                    .clientId(CLIENT_ID)
-                    .redirectUri(REDIRECT_URI)
-                    .scopes("openid")
-                    .onSignUp(configuration -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
-                    .onStep(step -> steps.add(step.type()))
+                    .withClientId(CLIENT_ID)
+                    .withRedirectUri(REDIRECT_URI)
+                    .withScopes("openid")
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
+                    .withStepListener(step -> steps.add(step.type()))
                     .run();
 
             // The per-step callback observed the whole flow, ending at the client redirect.

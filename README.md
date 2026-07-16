@@ -112,11 +112,11 @@ try (sympauthy) {
     sympauthy.start();
 
     TokenResponse tokens = InteractiveFlow.against(sympauthy)
-        .clientId("test-app")
-        .redirectUri("http://localhost/callback")
-        .scopes("openid")
-        .onSignUp(config -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
-        .onStep(step -> System.out.println("reached " + step.type()))  // optional: fires at every step
+        .withClientId("test-app")
+        .withRedirectUri("http://localhost/callback")
+        .withScopes("openid")
+        .withSignUpHandler(config -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
+        .withStepListener(step -> System.out.println("reached " + step.type()))  // optional: fires at every step
         .run()        // -> AuthorizationResult (holds the authorization code)
         .exchange();  // -> TokenResponse (access_token, id_token, …)
 }
@@ -125,11 +125,11 @@ try (sympauthy) {
 Register only the steps a flow needs — each callback is an independent functional interface:
 
 | Callback | Purpose |
-| ------------------------- | ------------------------------------------------------------------ |
-| `onSignIn(SignInHandler)` | supply credentials for an existing user |
-| `onSignUp(SignUpHandler)` | supply sign-up fields (password + identifier claims) for a new user |
-| `onClaims(ClaimsHandler)` | supply values when the flow collects extra claims |
-| `onStep(StepListener)`    | observe every step (logging, assertions) — does not influence the flow |
+| ------------------------------------------- | ------------------------------------------------------------------ |
+| `withSignInHandler(SignInHandler)`          | supply credentials for an existing user |
+| `withSignUpHandler(SignUpHandler)`          | supply sign-up fields (password + identifier claims) for a new user |
+| `withClaimsHandler(ClaimsHandler)`          | supply values when the flow collects extra claims |
+| `withStepListener(StepListener)`            | observe every step (logging, assertions) — does not influence the flow |
 
 `run()` returns an `AuthorizationResult` (the authorization code, plus `exchange()` for tokens). For
 finer control, `InteractiveFlow.against(sympauthy).api()` exposes a thin `FlowApiClient` with one

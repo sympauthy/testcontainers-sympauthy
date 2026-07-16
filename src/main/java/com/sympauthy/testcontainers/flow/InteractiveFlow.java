@@ -24,15 +24,15 @@ import java.util.Map;
  * authorization code — which {@link AuthorizationResult#exchange()} turns into tokens.
  *
  * <p>Register only the callbacks the flow needs; each is an independent functional interface, so a
- * password sign-up that collects no extra claims needs only {@link #onSignUp(SignUpHandler)}:
+ * password sign-up that collects no extra claims needs only {@link #withSignUpHandler(SignUpHandler)}:
  *
  * <pre>{@code
  * TokenResponse tokens = InteractiveFlow.against(container)
- *         .clientId("test-app")
- *         .redirectUri("http://localhost/callback")
- *         .scopes("openid", "profile", "email")
- *         .onSignUp(cfg -> Map.of("email", "ada@example.com", "password", "s3cret"))
- *         .onStep(step -> System.out.println(step.type()))   // optional: fires at every step
+ *         .withClientId("test-app")
+ *         .withRedirectUri("http://localhost/callback")
+ *         .withScopes("openid", "profile", "email")
+ *         .withSignUpHandler(cfg -> Map.of("email", "ada@example.com", "password", "s3cret"))
+ *         .withStepListener(step -> System.out.println(step.type()))   // optional: fires at every step
  *         .run()
  *         .exchange();
  * }</pre>
@@ -84,47 +84,47 @@ public final class InteractiveFlow {
                 stripTrailingSlash(baseUrl) + "/.well-known/openid-configuration");
     }
 
-    public InteractiveFlow clientId(String clientId) {
+    public InteractiveFlow withClientId(String clientId) {
         this.clientId = clientId;
         return this;
     }
 
-    public InteractiveFlow clientSecret(String clientSecret) {
+    public InteractiveFlow withClientSecret(String clientSecret) {
         this.clientSecret = clientSecret;
         return this;
     }
 
-    public InteractiveFlow redirectUri(String redirectUri) {
+    public InteractiveFlow withRedirectUri(String redirectUri) {
         this.redirectUri = redirectUri;
         return this;
     }
 
-    public InteractiveFlow scopes(String... scopes) {
+    public InteractiveFlow withScopes(String... scopes) {
         this.scopes = Arrays.asList(scopes);
         return this;
     }
 
-    public InteractiveFlow onSignIn(SignInHandler handler) {
+    public InteractiveFlow withSignInHandler(SignInHandler handler) {
         this.signInHandler = handler;
         return this;
     }
 
-    public InteractiveFlow onSignUp(SignUpHandler handler) {
+    public InteractiveFlow withSignUpHandler(SignUpHandler handler) {
         this.signUpHandler = handler;
         return this;
     }
 
-    public InteractiveFlow onClaims(ClaimsHandler handler) {
+    public InteractiveFlow withClaimsHandler(ClaimsHandler handler) {
         this.claimsHandler = handler;
         return this;
     }
 
-    public InteractiveFlow onValidationCode(ValidationCodeHandler handler) {
+    public InteractiveFlow withValidationCodeHandler(ValidationCodeHandler handler) {
         this.validationCodeHandler = handler;
         return this;
     }
 
-    public InteractiveFlow onStep(StepListener listener) {
+    public InteractiveFlow withStepListener(StepListener listener) {
         this.stepListener = listener;
         return this;
     }

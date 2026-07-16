@@ -89,7 +89,8 @@ endpoint to an authorization code (and tokens) without a browser. Two layers, bo
   encapsulates the Flow API's state transport: **GET carries the state as `?state=<jwt>`, POST carries
   it in an `Authorization: State <jwt>` header.** Use it directly for custom/partial flows.
 - **`InteractiveFlow`** — the runner. `InteractiveFlow.against(container)` → fluent config
-  (`clientId`, `redirectUri`, `scopes`, optional `clientSecret`) → per-step callbacks → `run()` →
+  (`withClientId`, `withRedirectUri`, `withScopes`, optional `withClientSecret`, all `with*` to match
+  the container's builder style) → per-step callbacks → `run()` →
   `AuthorizationResult` → `exchange()` → `TokenResponse`. The authorize/token endpoints are read from
   the **discovery document**, not hardcoded; the authorization code is captured by intercepting the
   redirect (the HTTP client disables redirect following), so no socket needs to listen on the
