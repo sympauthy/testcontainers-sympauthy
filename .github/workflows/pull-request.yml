@@ -1,0 +1,24 @@
+name: Pull Request
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs when a PR is pushed to again.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit and integration tests
+        uses: ./.github/actions/test
+        with:
+          unit: "true"
+          integration: "true"

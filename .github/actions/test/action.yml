@@ -1,0 +1,49 @@
+name: Test
+description: >-
+  Run the SympAuthy Testcontainers module test suites. Pick either or both
+  suites via the `unit` / `integration` inputs. Assumes the repository has
+  already been checked out by the calling workflow.
+
+inputs:
+  unit:
+    description: Run the fast, Docker-free unit tests
+    default: "true"
+  integration:
+    description: Run the container-starting integration tests (requires Docker)
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "17"
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v4
+
+    - name: Run unit tests
+      if: ${{ inputs.unit == 'true' }}
+      shell: bash
+      run: ./gradlew test
+    - name: Upload unit test report
+      if: ${{ inputs.unit == 'true' && !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-report
+        path: build/reports/tests/test
+        if-no-files-found: ignore
+
+    - name: Run integration tests
+      # ubuntu-latest ships a running Docker engine, which these tests require.
+      if: ${{ inputs.integration == 'true' }}
+      shell: bash
+      run: ./gradlew integrationTest
+    - name: Upload integration test report
+      if: ${{ inputs.integration == 'true' && !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-test-report
+        path: build/reports/tests/integrationTest
+        if-no-files-found: ignore
