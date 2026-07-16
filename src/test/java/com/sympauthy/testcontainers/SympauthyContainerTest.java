@@ -20,8 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Configuration tests for {@link SympauthyContainer}. These do not start Docker &mdash; they call
  * the (Docker-free) {@link SympauthyContainer#configure()} and assert the resulting program
  * arguments ({@link SympauthyContainer#getCommandParts()}) and environment
- * ({@link SympauthyContainer#getEnv()}) are wired correctly. Container-starting checks live in
- * {@link SympauthyContainerIT} (tagged {@code integration}).
+ * ({@link SympauthyContainer#getEnv()}) are wired correctly. Container-starting checks live in the
+ * {@code *IT} classes of the separate {@code integrationTest} source set.
  *
  * <p>Note: {@code GenericContainer#getDockerImageName()} resolves (pulls) the image in
  * Testcontainers 2.x, so it is deliberately not called here &mdash; the default image is asserted
