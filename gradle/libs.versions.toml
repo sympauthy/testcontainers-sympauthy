@@ -1,0 +1,18 @@
+[versions]
+# Testcontainers release we build and test against.
+testcontainers = "2.0.5"
+# Lowest Testcontainers release exposed to consumers through the `api` dependency. Declaring the
+# floor here (rather than the version we test with) widens compatibility: Gradle resolves to the
+# highest requested version, so consumers already on 2.0.0+ aren't forced to upgrade.
+testcontainers-min = "2.0.0"
+junit = "5.11.4"
+slf4j = "2.0.16"
+
+[libraries]
+# `api` dependency: pinned to the minimum supported version on purpose (see testcontainers-min).
+testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers-min" }
+testcontainers-junit-jupiter = { module = "org.testcontainers:testcontainers-junit-jupiter", version.ref = "testcontainers" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }

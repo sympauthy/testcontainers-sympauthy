@@ -76,7 +76,11 @@ Key invariants to preserve when editing:
 
 ## Dependency versioning
 
-`build.gradle.kts` deliberately declares the `api` Testcontainers dependency against the **lowest**
-supported release (`2.0.0`) while building/testing against a newer one (`testcontainersVersion`).
-Gradle resolves to the highest requested version, so consumers already on 2.0.0+ aren't forced to
-upgrade. The module is Testcontainers **2.x only** (2.0 relocated packages and dropped JUnit 4).
+Dependencies live in the Gradle version catalog at `gradle/libs.versions.toml`; `build.gradle.kts`
+references them through type-safe `libs.*` accessors. The catalog deliberately keeps **two**
+Testcontainers versions: `testcontainers-min` (`2.0.0`), which the `api` dependency
+(`libs.testcontainers`) is pinned to, and `testcontainers` (`2.0.5`), which the test-only
+`libs.testcontainers.junit.jupiter` uses and which we build/test against. Declaring the `api`
+dependency against the **lowest** supported release widens compatibility: Gradle resolves to the
+highest requested version, so consumers already on 2.0.0+ aren't forced to upgrade. The module is
+Testcontainers **2.x only** (2.0 relocated packages and dropped JUnit 4).

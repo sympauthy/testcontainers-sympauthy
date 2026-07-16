@@ -7,22 +7,18 @@ repositories {
     mavenCentral()
 }
 
-// The Testcontainers version we build and test against.
-val testcontainersVersion = "2.0.5"
-val junitVersion = "5.11.4"
-
 dependencies {
-    // The minimum Testcontainers version exposed to consumers. Declaring the `api` dependency
-    // against the lowest supported release (rather than the one we test with) widens
+    // The minimum Testcontainers version exposed to consumers. The `libs.testcontainers` alias is
+    // pinned to the lowest supported release (rather than the one we test with) to widen
     // compatibility: Gradle resolves to the highest requested version, so consumers already on
     // 2.0.0+ can use this library without being forced up to a newer Testcontainers.
-    api("org.testcontainers:testcontainers:2.0.0")
+    api(libs.testcontainers)
 
-    testImplementation(platform("org.junit:junit-bom:$junitVersion"))
-    testImplementation("org.testcontainers:testcontainers-junit-jupiter:$testcontainersVersion")
-    testImplementation("org.junit.jupiter:junit-jupiter")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.16")
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
+    testRuntimeOnly(libs.slf4j.simple)
 }
 
 // Container-starting integration tests live in their own source set (src/integrationTest/java)
