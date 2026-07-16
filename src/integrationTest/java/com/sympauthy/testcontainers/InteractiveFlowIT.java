@@ -17,75 +17,54 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Drives a real interactive flow end to end: boots SympAuthy with password sign-up + a public client
- * + a flow definition, signs a new user up through {@link InteractiveFlow}, and exchanges the
- * resulting authorization code for tokens.
+ * Drives a real interactive flow end to end: an {@link InteractiveFlow} mock frontend is wired into
+ * the container with {@link SympauthyContainer#withFlow}, then SympAuthy redirects a browser through
+ * the frontend's sign-up page to the client callback. The captured code is exchanged for tokens.
  */
 class InteractiveFlowIT extends AbstractSympauthyContainerIT {
 
     private static final String CLIENT_ID = "test-app";
-    private static final String REDIRECT_URI = "http://localhost/callback";
 
-    private static final Map<String, Object> CONFIG = Map.of(
+    /** Password auth with an email identifier; the client + flow come from {@link SympauthyContainer#withFlow}. */
+    private static final Map<String, Object> AUTH_AND_CLAIMS = Map.of(
             "auth", Map.of(
                     "by-password", Map.of("enabled", true),
                     "identifier-claims", List.of("email")),
-            "claims", Map.of("email", Map.of("enabled", true)),
-            "clients", Map.of(CLIENT_ID, Map.of(
-                    "public", true,
-                    "authorizationFlow", "default",
-                    "allowed-grant-types", List.of("authorization_code"),
-                    "allowed-scopes", List.of("openid"),
-                    "allowed-redirect-uris", List.of(REDIRECT_URI))),
-            // The flow's UI paths resolve against the container's pinned urls.root, so /authorize
-            // 303-redirects to <root>/sign-in?state=<jwt>; the driver reads that state and calls the
-            // Flow API (on the container) directly, never loading these pages.
-            "flows", Map.of("default", Map.of(
-                    "type", "web",
-                    "sign-in", "/sign-in",
-                    "sign-up", "/sign-up",
-                    "collect-claims", "/collect-claims",
-                    "validate-claims", "/validate-claims",
-                    "error", "/error")));
+            "claims", Map.of("email", Map.of("enabled", true)));
 
     @Test
     void signsUpAndExchangesCodeForTokens() throws Exception {
-        SympauthyContainer sympauthy = new SympauthyContainer().withConfig(CONFIG);
-        try {
-            sympauthy.start();
+        List<FlowStep.Type> steps = new ArrayList<>();
+        try (InteractiveFlow flow = InteractiveFlow.forClient(CLIENT_ID)
+                        .withScopes("openid")
+                        .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
+                        .withStepListener(step -> steps.add(step.type()));
+                SympauthyContainer sympauthy = new SympauthyContainer()
+                        .withConfig(AUTH_AND_CLAIMS)
+                        .withFlow(flow)) {
+            try {
+                sympauthy.start();
 
-            List<FlowStep.Type> steps = new ArrayList<>();
-            AuthorizationResult result = InteractiveFlow.against(sympauthy)
-                    .withClientId(CLIENT_ID)
-                    .withRedirectUri(REDIRECT_URI)
-                    .withScopes("openid")
-                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
-                    .withStepListener(step -> steps.add(step.type()))
-                    .run();
+                AuthorizationResult result = flow.run();
 
-            // The per-step callback observed the whole flow, ending at the client redirect.
-            assertEquals(
-                    List.of(FlowStep.Type.CONFIGURATION, FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED),
-                    steps);
-            assertNotNull(result.code(), "should receive an authorization code");
+                assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED), steps);
+                assertNotNull(result.code(), "should receive an authorization code");
 
-            // The code exchanges into real tokens issued by this very server.
-            TokenResponse tokens = result.exchange();
-            assertNotNull(tokens.accessToken(), "token response should carry an access token");
-            assertNotNull(tokens.idToken(), "the openid scope should yield an id_token");
+                TokenResponse tokens = result.exchange();
+                assertNotNull(tokens.accessToken(), "token response should carry an access token");
+                assertNotNull(tokens.idToken(), "the openid scope should yield an id_token");
 
-            JWTClaimsSet claims = SignedJWT.parse(tokens.idToken()).getJWTClaimsSet();
-            assertEquals(sympauthy.getIssuerUrl(), claims.getIssuer(),
-                    "id_token should be issued by this container");
-            assertTrue(claims.getAudience().contains(CLIENT_ID),
-                    "id_token audience should be the client, was: " + claims.getAudience());
-            assertNotNull(claims.getSubject(), "id_token should identify a subject");
-        } catch (Throwable failure) {
-            System.out.println("=== SYMPAUTHY CONTAINER LOGS ===");
-            System.out.println(safeLogs(sympauthy));
-            throw failure;
-        } finally {
-            sympauthy.stop();
+                JWTClaimsSet claims = SignedJWT.parse(tokens.idToken()).getJWTClaimsSet();
+                assertEquals(sympauthy.getIssuerUrl(), claims.getIssuer(),
+                        "id_token should be issued by this container");
+                assertTrue(claims.getAudience().contains(CLIENT_ID),
+                        "id_token audience should be the client, was: " + claims.getAudience());
+                assertNotNull(claims.getSubject(), "id_token should identify a subject");
+            } catch (Throwable failure) {
+                System.out.println("=== SYMPAUTHY CONTAINER LOGS ===");
+                System.out.println(safeLogs(sympauthy));
+                throw failure;
+            }
         }
     }
 

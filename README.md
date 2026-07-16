@@ -84,63 +84,54 @@ so the issuer stays reachable from host-side test code.
 
 ## Driving the interactive flow
 
-The `com.sympauthy.testcontainers.flow` package walks SympAuthy's
+The `com.sympauthy.testcontainers.flow` package drives SympAuthy's
 [interactive login flow](https://sympauthy.github.io/functional/interactive_flow.html)
-programmatically — from the OAuth authorize endpoint to an authorization code and tokens — so a test
-can exercise a full sign-in or sign-up without a browser. `InteractiveFlow` handles PKCE, the flow
-state, endpoint discovery, and the server's redirects; you register a callback for each step you care
-about.
+programmatically — from the OAuth authorize endpoint to an authorization code and tokens — without a
+browser. `InteractiveFlow` is a **mock of the flow frontend**: it stands up a small local HTTP server
+that plays the flow's pages (sign-in, collect-claims, …) plus the client's callback. SympAuthy still
+owns the orchestration — it decides, through the redirects it issues, which page comes next — while
+your callbacks "render" each page by submitting to the Flow API.
+
+Create the flow first (it binds a local port immediately), hand it to the container with `withFlow`,
+then start and `run()`:
 
 ```java
-// A container configured for a password authorization-code flow: password auth, a public client,
-// and a flow definition. The flow's sign-in/collect-claims/… entries are UI paths resolved against
-// the container's own root (urls.root, which the container pins): `/authorize` redirects there with
-// a state token, which the driver reads before calling the Flow API. SympAuthy just validates they
-// are present at startup — the driver never loads the pages.
-SympauthyContainer sympauthy = new SympauthyContainer().withConfig(Map.of(
-    "auth",    Map.of("by-password", Map.of("enabled", true), "identifier-claims", List.of("email")),
-    "claims",  Map.of("email", Map.of("enabled", true)),
-    "clients", Map.of("test-app", Map.of(
-        "public", true,
-        "authorizationFlow", "default",
-        "allowed-grant-types", List.of("authorization_code"),
-        "allowed-scopes", List.of("openid"),
-        "allowed-redirect-uris", List.of("http://localhost/callback"))),
-    "flows",   Map.of("default", Map.of(
-        "type", "web",
-        "sign-in", "/sign-in", "sign-up", "/sign-up",
-        "collect-claims", "/collect-claims", "validate-claims", "/validate-claims", "error", "/error"))));
-
-try (sympauthy) {
-    sympauthy.start();
-
-    TokenResponse tokens = InteractiveFlow.against(sympauthy)
-        .withClientId("test-app")
-        .withRedirectUri("http://localhost/callback")
+try (InteractiveFlow flow = InteractiveFlow.forClient("test-app")
         .withScopes("openid")
         .withSignUpHandler(config -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
-        .withStepListener(step -> System.out.println("reached " + step.type()))  // optional: fires at every step
-        .run()        // -> AuthorizationResult (holds the authorization code)
-        .exchange();  // -> TokenResponse (access_token, id_token, …)
+        .withStepListener(step -> System.out.println("reached " + step.type()));  // optional
+     SympauthyContainer sympauthy = new SympauthyContainer()
+        // Just the auth method + claims — withFlow contributes the client and flow definition,
+        // pointing SympAuthy's flow pages and client callback at the mock frontend:
+        .withConfig(Map.of(
+            "auth",   Map.of("by-password", Map.of("enabled", true), "identifier-claims", List.of("email")),
+            "claims", Map.of("email", Map.of("enabled", true))))
+        .withFlow(flow)) {
+
+    sympauthy.start();
+
+    TokenResponse tokens = flow.run()   // -> AuthorizationResult (holds the authorization code)
+        .exchange();                    // -> TokenResponse (access_token, id_token, …)
 }
 ```
 
-Register only the steps a flow needs — each callback is an independent functional interface:
+`withFlow(flow)` merges the `clients.<id>` + `flows.<id>` config the flow generates and tells the flow
+the container's URLs; then `/authorize` redirects a redirect-following client through the mock
+frontend's pages to its `/callback`, which captures the code. Register only the pages a flow reaches —
+each callback is an independent functional interface:
 
 | Callback | Purpose |
 | ------------------------------------------- | ------------------------------------------------------------------ |
 | `withSignInHandler(SignInHandler)`          | supply credentials for an existing user |
 | `withSignUpHandler(SignUpHandler)`          | supply sign-up fields (password + identifier claims) for a new user |
-| `withClaimsHandler(ClaimsHandler)`          | supply values when the flow collects extra claims |
-| `withStepListener(StepListener)`            | observe every step (logging, assertions) — does not influence the flow |
+| `withClaimsHandler(ClaimsHandler)`          | supply values when the collect-claims page is reached |
+| `withStepListener(StepListener)`            | observe every page the flow passes through — does not influence it |
 
 `run()` returns an `AuthorizationResult` (the authorization code, plus `exchange()` for tokens). For
-finer control, `InteractiveFlow.against(sympauthy).api()` exposes a thin `FlowApiClient` with one
-method per Flow API endpoint.
+lower-level access, `FlowApiClient` wraps each Flow API endpoint directly.
 
-> The driver covers the password happy path (configuration → sign-in/sign-up → collect claims →
-> code). Multi-factor auth and enforced email/SMS validation are auto-skipped when the server allows
-> it and otherwise raise `UnsupportedFlowStepException`.
+> The frontend covers the password happy path (sign-in/sign-up → collect claims → code). Multi-factor
+> auth and enforced email/SMS validation raise `UnsupportedFlowStepException`.
 
 ## Requirements
 

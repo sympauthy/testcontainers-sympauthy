@@ -1,8 +1,11 @@
 package com.sympauthy.testcontainers.flow;
 
-import com.sympauthy.testcontainers.SympauthyContainer;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -19,42 +22,44 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Drives SympAuthy's interactive authorization flow end to end from a test: it starts at the OAuth
- * authorize endpoint, walks each step invoking the per-step callbacks you register, and returns the
- * authorization code — which {@link AuthorizationResult#exchange()} turns into tokens.
+ * A mock of SympAuthy's interactive-flow <em>frontend</em>: a small HTTP server that stands in for the
+ * pages a user's browser would visit ({@code /sign-in}, {@code /collect-claims}, …) plus the client's
+ * {@code redirect_uri} callback. SympAuthy still owns the orchestration — it decides, via the
+ * {@code redirect_url} each Flow API call returns, which page comes next — while this server only
+ * "renders" each page by invoking the callback you registered and submitting to the Flow API.
  *
- * <p>Register only the callbacks the flow needs; each is an independent functional interface, so a
- * password sign-up that collects no extra claims needs only {@link #withSignUpHandler(SignUpHandler)}:
+ * <p>Because SympAuthy bakes the flow's page URLs into its configuration at startup, create the flow
+ * first (it binds a local port immediately), hand it to the container with
+ * {@link com.sympauthy.testcontainers.SympauthyContainer#withFlow(InteractiveFlow)}, then start the
+ * container and {@link #run()}:
  *
  * <pre>{@code
- * TokenResponse tokens = InteractiveFlow.against(container)
- *         .withClientId("test-app")
- *         .withRedirectUri("http://localhost/callback")
- *         .withScopes("openid", "profile", "email")
- *         .withSignUpHandler(cfg -> Map.of("email", "ada@example.com", "password", "s3cret"))
- *         .withStepListener(step -> System.out.println(step.type()))   // optional: fires at every step
- *         .run()
- *         .exchange();
+ * try (InteractiveFlow flow = InteractiveFlow.forClient("test-app")
+ *         .withScopes("openid")
+ *         .withSignUpHandler(cfg -> Map.of("email", "ada@example.com", "password", "s3cret"));
+ *      SympauthyContainer container = new SympauthyContainer()
+ *         .withConfig(passwordAuthAndClaims)
+ *         .withFlow(flow)) {
+ *     container.start();
+ *     TokenResponse tokens = flow.run().exchange();
+ * }
  * }</pre>
  *
- * <p>v1 automates the password happy path (configuration → sign-in/sign-up → collect claims →
- * authorization code). Steps it does not yet drive (MFA, enforced email/SMS validation) are
- * auto-skipped when the server allows it and raise {@link UnsupportedFlowStepException} otherwise.
- * The endpoints are discovered from the server's {@code /.well-known/openid-configuration}, not
- * hard-coded.
+ * <p>Register only the callbacks the flow reaches — each is an independent functional interface. v1
+ * covers the password happy path (sign-in/sign-up → collect claims → code); enforced MFA and
+ * email/SMS validation raise {@link UnsupportedFlowStepException}. The authorize/token endpoints are
+ * discovered from {@code /.well-known/openid-configuration}, and the authorization code is captured
+ * by the frontend's own {@code /callback} page.
  */
-public final class InteractiveFlow {
+public final class InteractiveFlow implements AutoCloseable {
 
-    private static final int MAX_STEPS = 20;
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
-    private final String discoveryUrl;
-    private final HttpClient httpClient;
-    private final FlowApiClient api;
+    private final String clientId;
+    private final HttpServer server;
+    private final String frontendBaseUrl;
 
-    private String clientId;
-    private String clientSecret;
-    private String redirectUri;
+    private String flowId = "default";
     private List<String> scopes = new ArrayList<>();
 
     private SignInHandler signInHandler;
@@ -63,39 +68,36 @@ public final class InteractiveFlow {
     private ValidationCodeHandler validationCodeHandler;
     private StepListener stepListener;
 
-    private InteractiveFlow(String baseUrl, String discoveryUrl) {
-        String base = stripTrailingSlash(baseUrl);
-        this.discoveryUrl = discoveryUrl;
-        // Redirect following is disabled so the authorize redirect (and any others) can be inspected
-        // rather than followed. Flow API steps return their next hop as a JSON redirect_url, so no
-        // HTTP redirect is ever auto-followed.
-        this.httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
-        this.api = new FlowApiClient(base, httpClient);
-    }
+    // Set by attach(), before run().
+    private String baseUrl;
+    private String discoveryUrl;
 
-    /** Targets the SympAuthy instance running in the given container. */
-    public static InteractiveFlow against(SympauthyContainer container) {
-        return new InteractiveFlow(container.getBaseUrl(), container.getOpenIdConfigurationUrl());
-    }
+    // Per-run state, written on the mock server's threads and read back on the run() thread.
+    private FlowApiClient api;
+    private volatile String capturedCode;
+    private volatile String capturedState;
+    private volatile RuntimeException failure;
 
-    /** Targets a SympAuthy instance at an arbitrary base URL. */
-    public static InteractiveFlow at(String baseUrl) {
-        return new InteractiveFlow(baseUrl,
-                stripTrailingSlash(baseUrl) + "/.well-known/openid-configuration");
-    }
-
-    public InteractiveFlow withClientId(String clientId) {
+    private InteractiveFlow(String clientId) {
         this.clientId = clientId;
-        return this;
+        try {
+            this.server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not start the mock flow frontend server", e);
+        }
+        this.frontendBaseUrl = "http://localhost:" + server.getAddress().getPort();
+        server.createContext("/", this::dispatch);
+        server.start();
     }
 
-    public InteractiveFlow withClientSecret(String clientSecret) {
-        this.clientSecret = clientSecret;
-        return this;
+    /** Creates a mock frontend that will authenticate as the given client id. */
+    public static InteractiveFlow forClient(String clientId) {
+        return new InteractiveFlow(clientId);
     }
 
-    public InteractiveFlow withRedirectUri(String redirectUri) {
-        this.redirectUri = redirectUri;
+    /** The SympAuthy {@code flows.<id>} this frontend backs (default {@code "default"}). */
+    public InteractiveFlow withFlowId(String flowId) {
+        this.flowId = flowId;
         return this;
     }
 
@@ -129,83 +131,145 @@ public final class InteractiveFlow {
         return this;
     }
 
-    /** The underlying thin Flow API client, for custom calls outside the managed run. */
-    public FlowApiClient api() {
-        return api;
+    /** The client id this flow authenticates as. */
+    public String clientId() {
+        return clientId;
     }
 
-    /** Drives the flow to the client redirect and returns the authorization code. */
+    /** The redirect URI the mock frontend serves as the client callback. */
+    public String redirectUri() {
+        return frontendBaseUrl + "/callback";
+    }
+
+    /** The base URL of the mock frontend server; its flow pages live directly under it. */
+    public String frontendUrl() {
+        return frontendBaseUrl;
+    }
+
+    /**
+     * The {@code clients.<id>} + {@code flows.<id>} configuration that points SympAuthy at this mock
+     * frontend. {@link com.sympauthy.testcontainers.SympauthyContainer#withFlow(InteractiveFlow)}
+     * merges this into the container for you.
+     */
+    public Map<String, Object> containerConfig() {
+        Map<String, Object> client = new LinkedHashMap<>();
+        client.put("public", true);
+        client.put("authorizationFlow", flowId);
+        client.put("allowed-grant-types", List.of("authorization_code"));
+        client.put("allowed-scopes", List.copyOf(scopes));
+        client.put("allowed-redirect-uris", List.of(redirectUri()));
+
+        Map<String, Object> flow = new LinkedHashMap<>();
+        flow.put("type", "web");
+        flow.put("sign-in", pageUrl("sign-in"));
+        flow.put("sign-up", pageUrl("sign-up"));
+        flow.put("collect-claims", pageUrl("collect-claims"));
+        flow.put("validate-claims", pageUrl("validate-claims"));
+        flow.put("error", pageUrl("error"));
+
+        return Map.of("clients", Map.of(clientId, client), "flows", Map.of(flowId, flow));
+    }
+
+    /** Connects this flow to a running SympAuthy instance. Called by {@code SympauthyContainer.withFlow}. */
+    public void attach(String baseUrl, String discoveryUrl) {
+        this.baseUrl = stripTrailingSlash(baseUrl);
+        this.discoveryUrl = discoveryUrl;
+    }
+
+    /** Drives the flow to the client callback and returns the captured authorization code. */
     public AuthorizationResult run() {
-        requireConfigured();
-        Map<String, Object> discovery = fetchDiscovery();
+        if (baseUrl == null) {
+            throw new IllegalStateException(
+                    "Flow is not attached to a container; call SympauthyContainer.withFlow(flow) first");
+        }
+        capturedCode = null;
+        capturedState = null;
+        failure = null;
+
+        HttpClient apiClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+        this.api = new FlowApiClient(baseUrl, apiClient);
+
+        Map<String, Object> discovery = fetchDiscovery(apiClient);
         String authorizationEndpoint = required(discovery, "authorization_endpoint");
         String tokenEndpoint = required(discovery, "token_endpoint");
 
         Pkce pkce = Pkce.generate();
-        String oauthState = randomToken();
-        String flowState = startAuthorization(authorizationEndpoint, oauthState, pkce);
+        String authorizeUrl = appendQuery(authorizationEndpoint, authorizeParams(randomToken(), pkce));
 
-        FlowResponse configResponse = api.getConfiguration(flowState);
-        FlowConfiguration configuration = FlowConfiguration.fromMap(configResponse.body());
-        emit(FlowStep.Type.CONFIGURATION, configResponse.body());
+        // A redirect-following "browser": it rides SympAuthy's 303s across the mock frontend pages
+        // until the frontend's /callback captures the code (or the /error page aborts).
+        HttpClient browser = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
+        HttpResponse<String> response = send(browser,
+                HttpRequest.newBuilder(URI.create(authorizeUrl)).GET().build());
 
-        String redirectUrl = authenticate(configuration, flowState);
+        if (failure != null) {
+            throw failure;
+        }
+        if (capturedCode == null) {
+            throw new FlowException("Flow did not reach the client callback (ended at " + response.uri()
+                    + ", HTTP " + response.statusCode() + ")");
+        }
+        emit(FlowStep.Type.COMPLETED, Map.of("code", capturedCode));
+        return new AuthorizationResult(capturedCode, capturedState, tokenEndpoint, redirectUri(),
+                clientId, null, pkce.codeVerifier, apiClient);
+    }
 
-        int steps = 0;
-        while (true) {
-            if (steps++ > MAX_STEPS) {
-                throw new FlowException("Flow did not reach the client redirect after " + MAX_STEPS + " steps");
-            }
-            if (targetsRedirectUri(redirectUrl)) {
-                String code = queryParam(redirectUrl, "code");
-                if (code == null) {
-                    throw new FlowException("Client redirect carried no authorization code: " + redirectUrl);
+    /** Stops the mock frontend server. */
+    @Override
+    public void close() {
+        server.stop(0);
+    }
+
+    // --- mock frontend pages (run on the HTTP server's threads) ---
+
+    private void dispatch(HttpExchange exchange) {
+        String path = exchange.getRequestURI().getPath();
+        String query = exchange.getRequestURI().getRawQuery();
+        String state = queryParam(query, "state");
+        String name = path.startsWith("/") ? path.substring(1) : path;
+        try {
+            switch (name) {
+                case "sign-in", "sign-up" -> respondRedirect(exchange, authenticatePage(state));
+                case "collect-claims" -> respondRedirect(exchange, collectClaimsPage(state));
+                case "validate-claims" -> respondRedirect(exchange, validateClaimsPage(state));
+                case "callback" -> {
+                    capturedCode = queryParam(query, "code");
+                    capturedState = queryParam(query, "state");
+                    respond(exchange, 200, "ok");
                 }
-                emit(FlowStep.Type.COMPLETED, Map.of("redirect_url", redirectUrl));
-                return new AuthorizationResult(code, queryParam(redirectUrl, "state"), tokenEndpoint,
-                        redirectUri, clientId, clientSecret, pkce.codeVerifier, httpClient);
+                case "error" -> {
+                    failure = new FlowException("Flow was redirected to the error page (" + query + ")");
+                    respond(exchange, 200, "error");
+                }
+                default -> respond(exchange, 404, "unknown flow page");
             }
-            redirectUrl = advance(redirectUrl);
+        } catch (RuntimeException e) {
+            failure = e;
+            safeRespond(exchange, 500);
+        } catch (Exception e) {
+            failure = new FlowException("Mock flow page failed", e);
+            safeRespond(exchange, 500);
         }
     }
 
-    private String authenticate(FlowConfiguration configuration, String flowState) {
+    private String authenticatePage(String state) {
+        FlowResponse configResponse = api.getConfiguration(state);
+        FlowConfiguration configuration = FlowConfiguration.fromMap(configResponse.body());
         if (signInHandler != null) {
             Credentials credentials = signInHandler.signIn(configuration);
-            emit(FlowStep.Type.SIGN_IN, Map.of("login", credentials.login()));
-            return requireRedirect(api.signIn(flowState, credentials.login(), credentials.password()), "sign-in");
+            emit(FlowStep.Type.SIGN_IN, configResponse.body());
+            return requireRedirect(api.signIn(state, credentials.login(), credentials.password()), "sign-in");
         }
         if (signUpHandler != null) {
             Map<String, Object> fields = signUpHandler.signUp(configuration);
-            emit(FlowStep.Type.SIGN_UP, Map.of());
-            return requireRedirect(api.signUp(flowState, fields), "sign-up");
+            emit(FlowStep.Type.SIGN_UP, configResponse.body());
+            return requireRedirect(api.signUp(state, fields), "sign-up");
         }
-        throw new FlowException("No authentication handler configured: call onSignIn(...) or onSignUp(...)");
+        throw new FlowException(
+                "No authentication handler: call withSignInHandler(...) or withSignUpHandler(...)");
     }
 
-    /** Handles one intermediate step (given its {@code redirect_url}) and returns the next one. */
-    private String advance(String redirectUrl) {
-        String state = queryParam(redirectUrl, "state");
-        String path = pathOf(redirectUrl);
-        if (path.contains("/claims/validation")) {
-            return handleValidation(redirectUrl, state, path);
-        }
-        if (path.endsWith("/claims")) {
-            return handleClaims(state);
-        }
-        if (path.contains("/mfa")) {
-            return handleMfa(state);
-        }
-        // Unknown intermediate endpoint: GET it and expect it to point onwards.
-        FlowResponse response = api.getUrl(redirectUrl);
-        String next = response.redirectUrl();
-        if (next == null) {
-            throw new UnsupportedFlowStepException("Unhandled flow step at " + redirectUrl + ": " + response.body());
-        }
-        return next;
-    }
-
-    private String handleClaims(String state) {
+    private String collectClaimsPage(String state) {
         FlowResponse response = api.getClaims(state);
         if (response.redirectUrl() != null) {
             return response.redirectUrl(); // nothing to collect: auto-skip
@@ -213,62 +277,22 @@ public final class InteractiveFlow {
         List<Claim> requested = claimsOf(response.body());
         emit(FlowStep.Type.CLAIMS, response.body());
         if (claimsHandler == null) {
-            throw new UnsupportedFlowStepException("Flow reached the collect-claims step with "
-                    + requested.size() + " claim(s) but no onClaims(...) handler was configured");
+            throw new UnsupportedFlowStepException("Flow reached the collect-claims page with "
+                    + requested.size() + " claim(s) but no withClaimsHandler(...) was configured");
         }
         return requireRedirect(api.postClaims(state, claimsHandler.provide(requested)), "claims");
     }
 
-    private String handleValidation(String redirectUrl, String state, String path) {
-        String media = mediaOf(path);
-        FlowResponse response = media == null ? api.getUrl(redirectUrl) : api.getValidation(state, media);
-        if (response.redirectUrl() != null) {
-            return response.redirectUrl(); // nothing to validate: auto-skip
-        }
-        emit(FlowStep.Type.VALIDATION, response.body());
-        if (validationCodeHandler == null || media == null) {
-            throw new UnsupportedFlowStepException("Flow requires "
-                    + (media == null ? "claim" : media) + " validation, which the v1 driver does not automate");
-        }
-        return requireRedirect(api.postValidation(state, media, validationCodeHandler.provide(media)), "validation");
+    private String validateClaimsPage(String state) {
+        emit(FlowStep.Type.VALIDATION, Map.of());
+        throw new UnsupportedFlowStepException(
+                "Flow requires claim validation, which the v1 driver does not automate");
     }
 
-    private String handleMfa(String state) {
-        FlowResponse response = api.getMfa(state);
-        if (response.redirectUrl() != null) {
-            return response.redirectUrl(); // MFA not required / auto-routed: follow
-        }
-        emit(FlowStep.Type.MFA, response.body());
-        throw new UnsupportedFlowStepException("Flow requires MFA, which the v1 driver does not automate");
-    }
+    // --- helpers ---
 
-    private String startAuthorization(String authorizationEndpoint, String oauthState, Pkce pkce) {
-        Map<String, String> params = new LinkedHashMap<>();
-        params.put("response_type", "code");
-        params.put("client_id", clientId);
-        params.put("redirect_uri", redirectUri);
-        params.put("scope", String.join(" ", scopes));
-        params.put("state", oauthState);
-        params.put("code_challenge", pkce.codeChallenge);
-        params.put("code_challenge_method", pkce.method);
-
-        HttpResponse<String> response = sendRaw(HttpRequest.newBuilder(
-                URI.create(appendQuery(authorizationEndpoint, params))).GET().build());
-        if (response.statusCode() / 100 != 3) {
-            throw new FlowException("Authorize endpoint did not redirect (HTTP " + response.statusCode()
-                    + "). Body: " + brief(response.body()));
-        }
-        String location = response.headers().firstValue("location")
-                .orElseThrow(() -> new FlowException("Authorize redirect had no Location header"));
-        String flowState = queryParam(location, "state");
-        if (flowState == null) {
-            throw new FlowException("Could not extract the flow state from the authorize redirect: " + location);
-        }
-        return flowState;
-    }
-
-    private Map<String, Object> fetchDiscovery() {
-        HttpResponse<String> response = sendRaw(HttpRequest.newBuilder(URI.create(discoveryUrl))
+    private Map<String, Object> fetchDiscovery(HttpClient client) {
+        HttpResponse<String> response = send(client, HttpRequest.newBuilder(URI.create(discoveryUrl))
                 .header("Accept", "application/json").GET().build());
         if (response.statusCode() != 200) {
             throw new FlowException("Discovery document returned HTTP " + response.statusCode());
@@ -276,15 +300,16 @@ public final class InteractiveFlow {
         return JsonCodec.parseObject(response.body());
     }
 
-    private HttpResponse<String> sendRaw(HttpRequest request) {
-        try {
-            return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        } catch (IOException e) {
-            throw new FlowException("HTTP call to " + request.uri() + " failed", e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new FlowException("HTTP call interrupted", e);
-        }
+    private Map<String, String> authorizeParams(String oauthState, Pkce pkce) {
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("response_type", "code");
+        params.put("client_id", clientId);
+        params.put("redirect_uri", redirectUri());
+        params.put("scope", String.join(" ", scopes));
+        params.put("state", oauthState);
+        params.put("code_challenge", pkce.codeChallenge);
+        params.put("code_challenge_method", pkce.method);
+        return params;
     }
 
     private void emit(FlowStep.Type type, Map<String, Object> data) {
@@ -293,23 +318,21 @@ public final class InteractiveFlow {
         }
     }
 
-    private void requireConfigured() {
-        if (clientId == null) {
-            throw new IllegalStateException("clientId(...) is required");
+    private static HttpResponse<String> send(HttpClient client, HttpRequest request) {
+        try {
+            return client.send(request, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException e) {
+            throw new FlowException("HTTP call to " + request.uri() + " failed", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new FlowException("HTTP call interrupted", e);
         }
-        if (redirectUri == null) {
-            throw new IllegalStateException("redirectUri(...) is required");
-        }
-    }
-
-    private boolean targetsRedirectUri(String redirectUrl) {
-        return redirectUrl.startsWith(redirectUri);
     }
 
     private static String requireRedirect(FlowResponse response, String step) {
         String url = response.redirectUrl();
         if (url == null) {
-            throw new FlowException(step + " step returned no redirect_url (HTTP "
+            throw new FlowException(step + " page got no redirect_url (HTTP "
                     + response.statusCode() + "): " + response.body());
         }
         return url;
@@ -336,45 +359,40 @@ public final class InteractiveFlow {
         return claims;
     }
 
-    /** The path of a URL that may be absolute or root-relative, excluding any query string. */
-    private static String pathOf(String url) {
-        String withoutQuery = url;
-        int query = withoutQuery.indexOf('?');
-        if (query >= 0) {
-            withoutQuery = withoutQuery.substring(0, query);
-        }
-        if (withoutQuery.startsWith("http://") || withoutQuery.startsWith("https://")) {
-            return URI.create(withoutQuery).getPath();
-        }
-        return withoutQuery;
+    /** The mock frontend URL for a named page. */
+    private String pageUrl(String name) {
+        return frontendBaseUrl + "/" + name;
     }
 
-    /** The media segment of a {@code .../claims/validation/<media>} path, or {@code null} if absent. */
-    private static String mediaOf(String path) {
-        String marker = "/claims/validation/";
-        int index = path.indexOf(marker);
-        if (index < 0) {
-            return null;
-        }
-        String rest = path.substring(index + marker.length());
-        if (rest.isEmpty()) {
-            return null;
-        }
-        int slash = rest.indexOf('/');
-        return slash < 0 ? rest : rest.substring(0, slash);
+    private void respondRedirect(HttpExchange exchange, String location) throws IOException {
+        exchange.getResponseHeaders().add("Location", location);
+        respond(exchange, 303, null);
     }
 
-    private static String queryParam(String url, String name) {
-        int query = url.indexOf('?');
-        if (query < 0) {
+    private static void respond(HttpExchange exchange, int status, String body) throws IOException {
+        if (body == null) {
+            exchange.sendResponseHeaders(status, -1);
+        } else {
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(status, bytes.length);
+            exchange.getResponseBody().write(bytes);
+        }
+        exchange.close();
+    }
+
+    private static void safeRespond(HttpExchange exchange, int status) {
+        try {
+            respond(exchange, status, "flow error");
+        } catch (IOException ignored) {
+            exchange.close();
+        }
+    }
+
+    private static String queryParam(String query, String name) {
+        if (query == null) {
             return null;
         }
-        String queryString = url.substring(query + 1);
-        int fragment = queryString.indexOf('#');
-        if (fragment >= 0) {
-            queryString = queryString.substring(0, fragment);
-        }
-        for (String pair : queryString.split("&")) {
+        for (String pair : query.split("&")) {
             int equals = pair.indexOf('=');
             String key = equals < 0 ? pair : pair.substring(0, equals);
             if (key.equals(name)) {
@@ -386,8 +404,7 @@ public final class InteractiveFlow {
     }
 
     private static String appendQuery(String base, Map<String, String> params) {
-        StringBuilder builder = new StringBuilder(base);
-        builder.append(base.contains("?") ? '&' : '?');
+        StringBuilder builder = new StringBuilder(base).append(base.contains("?") ? '&' : '?');
         boolean first = true;
         for (Map.Entry<String, String> entry : params.entrySet()) {
             if (!first) {
@@ -405,13 +422,6 @@ public final class InteractiveFlow {
         byte[] bytes = new byte[16];
         SECURE_RANDOM.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    private static String brief(String body) {
-        if (body == null) {
-            return "";
-        }
-        return body.length() <= 200 ? body : body.substring(0, 200) + "…";
     }
 
     private static String stripTrailingSlash(String url) {

@@ -83,46 +83,52 @@ Key invariants to preserve when editing:
 `com.sympauthy.testcontainers.flow` drives SympAuthy's
 [interactive flow](https://sympauthy.github.io/functional/interactive_flow.html) via its
 [Flow API](https://sympauthy.github.io/technical/api/flow.html), so a test can go from the authorize
-endpoint to an authorization code (and tokens) without a browser. Two layers, both public:
+endpoint to an authorization code (and tokens) without a browser.
 
-- **`FlowApiClient`** — one method per Flow API endpoint, returning a parsed `FlowResponse`. It
-  encapsulates the Flow API's state transport: **GET carries the state as `?state=<jwt>`, POST carries
-  it in an `Authorization: State <jwt>` header.** Use it directly for custom/partial flows.
-- **`InteractiveFlow`** — the runner. `InteractiveFlow.against(container)` → fluent config
-  (`withClientId`, `withRedirectUri`, `withScopes`, optional `withClientSecret`, all `with*` to match
-  the container's builder style) → per-step callbacks → `run()` →
-  `AuthorizationResult` → `exchange()` → `TokenResponse`. The authorize/token endpoints are read from
-  the **discovery document**, not hardcoded; the authorization code is captured by intercepting the
-  redirect (the HTTP client disables redirect following), so no socket needs to listen on the
-  `redirect_uri`.
+**`InteractiveFlow` is a mock of the flow *frontend*, not a client.** It runs a small
+`com.sun.net.httpserver.HttpServer` that plays the flow's pages (`/sign-in`, `/collect-claims`,
+`/validate-claims`, `/error`) plus the client's `/callback`. SympAuthy owns the orchestration — it
+decides, via the `redirect_url` each Flow API call returns, which page comes next — while each mock
+page just calls the registered callback and submits to the Flow API. A redirect-**following** HTTP
+client ("browser") rides SympAuthy's 303s across the pages until `/callback` captures the code.
+
+Lifecycle (the flow's page URLs must be in SympAuthy's startup config, so the server binds first):
+`InteractiveFlow.forClient(id)` (binds a local port) → `container.withFlow(flow)` (merges the flow's
+`clients.<id>` + `flows.<id>` config and calls `flow.attach(baseUrl, discoveryUrl)`) →
+`container.start()` → `flow.run()` → `AuthorizationResult` → `exchange()` → `TokenResponse`. The
+authorize/token endpoints are read from the **discovery document**, not hardcoded.
 
 Key points when extending:
 
+- **`SympauthyContainer.withFlow(InteractiveFlow)`** is the one place the core container depends on the
+  flow package (chosen for ergonomics). It only contributes the client + flow definition; the caller
+  still configures the auth method and claims separately.
+- **`FlowApiClient`** — the thin client each mock page uses (one method per Flow API endpoint,
+  returning a parsed `FlowResponse`). It encapsulates the state transport: **GET carries the state as
+  `?state=<jwt>`, POST carries it in an `Authorization: State <jwt>` header.** Public, for custom flows.
 - **Callbacks are segregated single-method interfaces** (`SignInHandler`, `SignUpHandler`,
-  `ClaimsHandler`, `ValidationCodeHandler`, `StepListener`) — register only what a flow needs; a
-  missing handler for a step that is actually reached throws `UnsupportedFlowStepException`.
-  `StepListener` observes *every* step. This split is deliberate — do not collapse it into one fat
-  interface.
-- **v1 covers the password happy path** (configuration → sign-in/sign-up → collect claims → code).
-  MFA and enforced email/SMS validation auto-skip when the server allows it and otherwise throw
-  `UnsupportedFlowStepException`. `ValidationCodeHandler` is the seam for a future validation tier.
-- **PKCE `S256` is always sent**; token exchange works for a public client (verifier only) or a
-  confidential one (add `clientSecret`).
+  `ClaimsHandler`, `ValidationCodeHandler`, `StepListener`), registered with `with*`. A page reached
+  without its handler throws; `StepListener` observes *every* page. Do not collapse the split.
+- **v1 covers the password happy path** (sign-in/sign-up → collect claims → code). The
+  `/validate-claims` page throws `UnsupportedFlowStepException` (the seam for a future validation
+  tier); MFA is not modelled.
+- **PKCE `S256` is always sent**; `withFlow` generates a **public** client, so token exchange uses the
+  verifier only (no secret).
 - **`JsonCodec` is the only class that touches the JSON parser.** It wraps `minimal-json`, which the
   Shadow plugin relocates into `com.sympauthy.testcontainers.internal.json` — swapping parsers is a
   one-file change.
-- **Unit tests are Docker-free** (`src/test/java/.../flow/`): the whole `InteractiveFlow.run()` loop
-  is driven against an in-JVM `com.sun.net.httpserver.HttpServer` stub (`TestFlowServer`) that scripts
-  `redirect_url` responses and records requests. `InteractiveFlowIT` boots a real container.
-- **Container config for a drivable flow** (see `InteractiveFlowIT`): password auth + a public client
-  (`clients.<id>`: `public`, `authorizationFlow`, `allowed-grant-types`, `allowed-scopes`,
-  `allowed-redirect-uris`) + a flow. SympAuthy's flow keys are **flat** and validated at startup:
-  `flows.<id>.{type, sign-in, collect-claims, validate-claims, error}` must all be present, else the
-  authorize endpoint returns HTTP 500 `config.invalid` (the container still boots — the readiness
-  printer only logs the errors). Those entries are UI paths resolved against the pinned `urls.root`,
-  so `/authorize` 303-redirects to `<root>/sign-in?state=<jwt>`; the runner extracts that `state` and
-  never loads the UI. Note the runner always reads the Flow API from the container's base URL, **not**
-  the redirect target — the Flow API is served by SympAuthy even when the flow UI lives elsewhere.
+- **Unit tests are Docker-free** (`src/test/java/.../flow/`): the mock frontend runs against a stub
+  SympAuthy (the in-JVM `TestFlowServer`) whose `/authorize` redirects to the frontend's page URLs and
+  whose Flow API returns scripted `redirect_url`s. `InteractiveFlowIT` boots a real container and wires
+  the frontend with `withFlow`.
+- **How the redirects flow (verified):** with the flow's page URLs pointing at the mock frontend,
+  `/authorize` 303-redirects the browser to `<frontend>/sign-in?state=<jwt>`; each page's Flow API call
+  returns the next `redirect_url` (another frontend page, or the client `/callback?code=`). The browser
+  hits SympAuthy only at `/authorize`; the frontend pages call the Flow API server-side on the
+  container's base URL. SympAuthy's flow keys are **flat** and validated at startup
+  (`flows.<id>.{type, sign-in, collect-claims, validate-claims, error}` must all be present, else
+  `/authorize` returns HTTP 500 `config.invalid` — the container still boots, the readiness printer
+  only logs the errors).
 
 ## Dependency versioning
 
