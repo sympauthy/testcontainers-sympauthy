@@ -300,15 +300,17 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
     }
 
     /**
-     * Wires an {@link InteractiveFlow} mock frontend into this container: SympAuthy is pointed at the
-     * flow's pages and callback, and the flow is told this container's URLs so
-     * {@link InteractiveFlow#run()} can drive it after {@link #start()}. Configure the authentication
-     * method (e.g. password) and claims separately, as usual.
+     * Wires an {@link InteractiveFlow} mock frontend into this container: SympAuthy's flow definition
+     * is pointed at the flow's pages, and the flow is told this container's URLs so
+     * {@link InteractiveFlow#run()} can drive it after {@link #start()}.
      *
-     * <p>The flow's {@code clients.<id>} and {@code flows.<id>} config is applied via
-     * {@link #withProperties(Map)} (program-argument overrides), so it takes precedence over any
-     * client/flow config the caller supplied through config files or environment profiles and does not
-     * erase the rest of their configuration.
+     * <p>Only the {@code flows.<id>} definition is contributed here (applied via
+     * {@link #withProperties(Map)}, so it wins over any flow config supplied through config files or
+     * environment profiles without erasing the rest). The <b>client is yours to configure</b>: define a
+     * {@code clients.<id>} whose id is {@link InteractiveFlow#clientId()}, whose
+     * {@code authorizationFlow} is {@link InteractiveFlow#flowId()}, and whose
+     * {@code allowed-redirect-uris} includes {@link InteractiveFlow#redirectUri()} — along with the
+     * authentication method (e.g. password) and claims.
      *
      * <p>Because the flow's page URLs must be baked into SympAuthy's startup configuration, create the
      * flow (with {@link InteractiveFlow#forClient(String)}) <em>before</em> calling this.
@@ -318,7 +320,7 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
      */
     public SympauthyContainer withFlow(InteractiveFlow flow) {
         flow.attach(getBaseUrl(), getOpenIdConfigurationUrl());
-        return withProperties(flow.containerProperties());
+        return withProperties(flow.flowProperties());
     }
 
     @Override

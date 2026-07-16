@@ -101,12 +101,17 @@ try (InteractiveFlow flow = InteractiveFlow.forClient("test-app")
         .withSignUpHandler(config -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
         .withStepListener(step -> System.out.println("reached " + step.type()));  // optional
      SympauthyContainer sympauthy = new SympauthyContainer()
-        // Just the auth method + claims — withFlow contributes the client and flow definition,
-        // pointing SympAuthy's flow pages and client callback at the mock frontend:
         .withConfig(Map.of(
-            "auth",   Map.of("by-password", Map.of("enabled", true), "identifier-claims", List.of("email")),
-            "claims", Map.of("email", Map.of("enabled", true))))
-        .withFlow(flow)) {
+            "auth",    Map.of("by-password", Map.of("enabled", true), "identifier-claims", List.of("email")),
+            "claims",  Map.of("email", Map.of("enabled", true)),
+            // You own the client — point it at the flow's callback and flow id:
+            "clients", Map.of("test-app", Map.of(
+                "public", true,
+                "authorizationFlow", flow.flowId(),
+                "allowed-grant-types", List.of("authorization_code"),
+                "allowed-scopes", List.of("openid"),
+                "allowed-redirect-uris", List.of(flow.redirectUri())))))
+        .withFlow(flow)) {   // contributes only the flows.<id> definition
 
     sympauthy.start();
 
@@ -115,9 +120,10 @@ try (InteractiveFlow flow = InteractiveFlow.forClient("test-app")
 }
 ```
 
-`withFlow(flow)` applies the `clients.<id>` + `flows.<id>` config the flow generates as
-program-argument overrides — so it takes precedence over any client/flow config you set elsewhere,
-without erasing the rest — and tells the flow the container's URLs. Then `/authorize` redirects a
+`withFlow(flow)` contributes only the `flows.<id>` definition (the mock frontend's pages), applied as
+program-argument overrides so it wins over any flow config you set elsewhere, and tells the flow the
+container's URLs. **You own the client:** give it `flow.clientId()`, set its `authorizationFlow` to
+`flow.flowId()`, and include `flow.redirectUri()` in its redirect URIs. Then `/authorize` redirects a
 redirect-following client through the mock frontend's pages to its `/callback`, which captures the
 code. Register only the pages a flow reaches — each callback is an independent functional interface:
 

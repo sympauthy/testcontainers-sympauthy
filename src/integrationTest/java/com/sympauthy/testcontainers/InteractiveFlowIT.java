@@ -25,12 +25,23 @@ class InteractiveFlowIT extends AbstractSympauthyContainerIT {
 
     private static final String CLIENT_ID = "test-app";
 
-    /** Password auth with an email identifier; the client + flow come from {@link SympauthyContainer#withFlow}. */
-    private static final Map<String, Object> AUTH_AND_CLAIMS = Map.of(
-            "auth", Map.of(
-                    "by-password", Map.of("enabled", true),
-                    "identifier-claims", List.of("email")),
-            "claims", Map.of("email", Map.of("enabled", true)));
+    /**
+     * Password auth with an email identifier, plus the public client the test owns — wired to the
+     * flow's callback and flow id. Only the {@code flows.<id>} definition comes from {@code withFlow}.
+     */
+    private static Map<String, Object> config(InteractiveFlow flow) {
+        return Map.of(
+                "auth", Map.of(
+                        "by-password", Map.of("enabled", true),
+                        "identifier-claims", List.of("email")),
+                "claims", Map.of("email", Map.of("enabled", true)),
+                "clients", Map.of(flow.clientId(), Map.of(
+                        "public", true,
+                        "authorizationFlow", flow.flowId(),
+                        "allowed-grant-types", List.of("authorization_code"),
+                        "allowed-scopes", List.of("openid"),
+                        "allowed-redirect-uris", List.of(flow.redirectUri()))));
+    }
 
     @Test
     void signsUpAndExchangesCodeForTokens() throws Exception {
@@ -40,7 +51,7 @@ class InteractiveFlowIT extends AbstractSympauthyContainerIT {
                         .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
                         .withStepListener(step -> steps.add(step.type()));
                 SympauthyContainer sympauthy = new SympauthyContainer()
-                        .withConfig(AUTH_AND_CLAIMS)
+                        .withConfig(config(flow))
                         .withFlow(flow)) {
             try {
                 sympauthy.start();

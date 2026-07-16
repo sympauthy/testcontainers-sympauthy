@@ -94,17 +94,19 @@ client ("browser") rides SympAuthy's 303s across the pages until `/callback` cap
 
 Lifecycle (the flow's page URLs must be in SympAuthy's startup config, so the server binds first):
 `InteractiveFlow.forClient(id)` (binds a local port) → `container.withFlow(flow)` (applies the flow's
-`clients.<id>` + `flows.<id>` config and calls `flow.attach(baseUrl, discoveryUrl)`) →
+`flows.<id>` definition and calls `flow.attach(baseUrl, discoveryUrl)`; you supply the matching client)
+→
 `container.start()` → `flow.run()` → `AuthorizationResult` → `exchange()` → `TokenResponse`. The
 authorize/token endpoints are read from the **discovery document**, not hardcoded.
 
 Key points when extending:
 
 - **`SympauthyContainer.withFlow(InteractiveFlow)`** is the one place the core container depends on the
-  flow package (chosen for ergonomics). It only contributes the client + flow definition — applied via
-  `withProperties` (program-argument overrides) from `flow.containerProperties()`, so the flow's config
-  wins over caller-supplied config files/profiles without erasing them. The caller still configures the
-  auth method and claims separately.
+  flow package (chosen for ergonomics). It contributes **only** the `flows.<id>` definition — applied
+  via `withProperties` (program-argument overrides) from `flow.flowProperties()`, so it wins over
+  caller-supplied flow config without erasing it. The **client is the caller's** to define
+  (`clients.<id>` with id `flow.clientId()`, `authorizationFlow` `flow.flowId()`, and
+  `allowed-redirect-uris` including `flow.redirectUri()`), along with the auth method and claims.
 - **`FlowApiClient`** — the thin client each mock page uses (one method per Flow API endpoint,
   returning a parsed `FlowResponse`). It encapsulates the state transport: **GET carries the state as
   `?state=<jwt>`, POST carries it in an `Authorization: State <jwt>` header.** Public, for custom flows.

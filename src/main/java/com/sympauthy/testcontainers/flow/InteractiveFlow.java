@@ -131,12 +131,17 @@ public final class InteractiveFlow implements AutoCloseable {
         return this;
     }
 
-    /** The client id this flow authenticates as. */
+    /** The client id this flow authenticates as; configure a matching {@code clients.<id>}. */
     public String clientId() {
         return clientId;
     }
 
-    /** The redirect URI the mock frontend serves as the client callback. */
+    /** The flow id this frontend backs; set your client's {@code authorizationFlow} to it. */
+    public String flowId() {
+        return flowId;
+    }
+
+    /** The redirect URI the mock frontend serves as the client callback; allow it on your client. */
     public String redirectUri() {
         return frontendBaseUrl + "/callback";
     }
@@ -147,24 +152,18 @@ public final class InteractiveFlow implements AutoCloseable {
     }
 
     /**
-     * The {@code clients.<id>} + {@code flows.<id>} configuration that points SympAuthy at this mock
-     * frontend, as flat Micronaut property keys (list elements use {@code [i]} indices).
+     * The {@code flows.<id>} definition that points SympAuthy at this mock frontend's pages, as flat
+     * Micronaut property keys.
      * {@link com.sympauthy.testcontainers.SympauthyContainer#withFlow(InteractiveFlow)} applies these
-     * as program-argument overrides, so they win over any client/flow config the caller supplied via
-     * config files or environment profiles, without disturbing the rest of it.
+     * as program-argument overrides, so they win over any flow config the caller supplied via config
+     * files or environment profiles, without disturbing the rest of it.
+     *
+     * <p>The client is <em>yours</em> to configure: define a {@code clients.<id>} whose id is
+     * {@link #clientId()}, whose {@code authorizationFlow} is {@link #flowId()}, and whose
+     * {@code allowed-redirect-uris} includes {@link #redirectUri()}.
      */
-    public Map<String, String> containerProperties() {
+    public Map<String, String> flowProperties() {
         Map<String, String> properties = new LinkedHashMap<>();
-
-        String client = "clients." + clientId + ".";
-        properties.put(client + "public", "true");
-        properties.put(client + "authorizationFlow", flowId);
-        properties.put(client + "allowed-grant-types[0]", "authorization_code");
-        for (int i = 0; i < scopes.size(); i++) {
-            properties.put(client + "allowed-scopes[" + i + "]", scopes.get(i));
-        }
-        properties.put(client + "allowed-redirect-uris[0]", redirectUri());
-
         String flow = "flows." + flowId + ".";
         properties.put(flow + "type", "web");
         properties.put(flow + "sign-in", pageUrl("sign-in"));
@@ -172,7 +171,6 @@ public final class InteractiveFlow implements AutoCloseable {
         properties.put(flow + "collect-claims", pageUrl("collect-claims"));
         properties.put(flow + "validate-claims", pageUrl("validate-claims"));
         properties.put(flow + "error", pageUrl("error"));
-
         return properties;
     }
 
