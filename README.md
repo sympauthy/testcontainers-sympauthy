@@ -87,45 +87,50 @@ so the issuer stays reachable from host-side test code.
 The `com.sympauthy.testcontainers.flow` package drives SympAuthy's
 [interactive login flow](https://sympauthy.github.io/functional/interactive_flow.html)
 programmatically — from the OAuth authorize endpoint to an authorization code and tokens — without a
-browser. `InteractiveFlow` is a **mock of the flow frontend**: it stands up a small local HTTP server
-that plays the flow's pages (sign-in, collect-claims, …) plus the client's callback. SympAuthy still
-owns the orchestration — it decides, through the redirects it issues, which page comes next — while
-your callbacks "render" each page by submitting to the Flow API.
+browser. `InteractiveFlowRegistry` is a **mock of the flow frontend**: it stands up a small local HTTP
+server that plays the flow's pages (sign-in, collect-claims, …) plus the client's callback. One
+registry hosts one `flows.<id>` definition and one client, but any number of `InteractiveFlow`s — each
+a single scripted run (a sign-up, a sign-in, …) minted with `registry.newFlow()`. SympAuthy still owns
+the orchestration — it decides, through the redirects it issues, which page comes next — while your
+callbacks "render" each page by submitting to the Flow API.
 
-Create the flow first (it binds a local port immediately), hand it to the container with `withFlow`,
-then start and `run()`:
+Create the registry first (it binds a local port immediately), hand it to the container with
+`withFlows`, then mint a flow, start, and `run()`:
 
 ```java
-try (InteractiveFlow flow = InteractiveFlow.forClient("test-app")
-        .withScopes("openid")
-        .withSignUpHandler(config -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
-        .withStepListener(step -> System.out.println("reached " + step.type()));  // optional
+try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app")
+        .withScopes("openid");
      SympauthyContainer sympauthy = new SympauthyContainer()
         .withConfig(Map.of(
             "auth",    Map.of("by-password", Map.of("enabled", true), "identifier-claims", List.of("email")),
             "claims",  Map.of("email", Map.of("enabled", true)),
-            // You own the client — point it at the flow's callback and flow id:
+            // You own the client — point it at the frontend's callback and flow id:
             "clients", Map.of("test-app", Map.of(
                 "public", true,
-                "authorizationFlow", flow.flowId(),
+                "authorizationFlow", registry.flowId(),
                 "allowed-grant-types", List.of("authorization_code"),
                 "allowed-scopes", List.of("openid"),
-                "allowed-redirect-uris", List.of(flow.redirectUri())))))
-        .withFlow(flow)) {   // contributes only the flows.<id> definition
+                "allowed-redirect-uris", List.of(registry.redirectUri())))))
+        .withFlows(registry)) {   // contributes only the flows.<id> definition
+
+    InteractiveFlow signUp = registry.newFlow()
+        .withSignUpHandler(config -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
+        .withStepListener(step -> System.out.println("reached " + step.type()));  // optional
 
     sympauthy.start();
 
-    TokenResponse tokens = flow.run()   // -> AuthorizationResult (holds the authorization code)
-        .exchange();                    // -> TokenResponse (access_token, id_token, …)
+    TokenResponse tokens = signUp.run()   // -> AuthorizationResult (holds the authorization code)
+        .exchange();                      // -> TokenResponse (access_token, id_token, …)
 }
 ```
 
-`withFlow(flow)` contributes only the `flows.<id>` definition (the mock frontend's pages), applied as
-program-argument overrides so it wins over any flow config you set elsewhere, and tells the flow the
-container's URLs. **You own the client:** give it `flow.clientId()`, set its `authorizationFlow` to
-`flow.flowId()`, and include `flow.redirectUri()` in its redirect URIs. Then `/authorize` redirects a
-redirect-following client through the mock frontend's pages to its `/callback`, which captures the
-code. Register only the pages a flow reaches — each callback is an independent functional interface:
+`withFlows(registry)` contributes only the `flows.<id>` definition (the mock frontend's pages), applied
+as program-argument overrides so it wins over any flow config you set elsewhere, and tells the frontend
+the container's URLs. **You own the client:** give it `registry.clientId()`, set its `authorizationFlow`
+to `registry.flowId()`, and include `registry.redirectUri()` in its redirect URIs. Then `/authorize`
+redirects a redirect-following client through the mock frontend's pages to its `/callback`, which
+captures the code. Register only the pages a flow reaches — each callback is an independent functional
+interface:
 
 | Callback | Purpose |
 | ------------------------------------------- | ------------------------------------------------------------------ |
@@ -136,6 +141,17 @@ code. Register only the pages a flow reaches — each callback is an independent
 
 `run()` returns an `AuthorizationResult` (the authorization code, plus `exchange()` for tokens). For
 lower-level access, `FlowApiClient` wraps each Flow API endpoint directly.
+
+Register a flow per run and run them in order to chain scenarios against one container — for example a
+sign-up that creates a user, then a sign-in as that same user (both share the one client and flow):
+
+```java
+InteractiveFlow signUp = registry.newFlow().withSignUpHandler(cfg -> Map.of("email", email, "password", password));
+InteractiveFlow signIn = registry.newFlow().withSignInHandler(cfg -> Credentials.of(email, password));
+sympauthy.start();
+signUp.run().exchange();                          // creates the user
+TokenResponse tokens = signIn.run().exchange();   // signs in as that user
+```
 
 > The frontend covers the password happy path (sign-in/sign-up → collect claims → code). Multi-factor
 > auth and enforced email/SMS validation raise `UnsupportedFlowStepException`.

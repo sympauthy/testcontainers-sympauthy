@@ -1,28 +1,30 @@
 package com.sympauthy.testcontainers.flow;
 
-import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.sympauthy.testcontainers.AbstractSympauthyContainerIT;
 import com.sympauthy.testcontainers.SympauthyContainer;
 import org.junit.jupiter.api.Test;
 
+import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Drives a real interactive flow end to end: an {@link InteractiveFlowRegistry} mock frontend is wired
- * into the container with {@link SympauthyContainer#withFlows}, then SympAuthy redirects a browser
- * through the frontend's sign-up page to the client callback. The captured code is exchanged for
- * tokens.
+ * Drives a real sign-in end to end. Sign-in cannot be tested in isolation — the user has to exist
+ * first — so this registers two flows on one {@link InteractiveFlowRegistry} (sharing a single client
+ * and flow definition): a sign-up that creates the user, then a sign-in as that same user. The proof
+ * that sign-in genuinely authenticated the account is that both runs yield id_tokens with the
+ * <em>same</em> subject.
  */
-class SignUpWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
+class SignInWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
 
     private static final String CLIENT_ID = "test-app";
+    private static final String EMAIL = "ada@example.com";
+    private static final String PASSWORD = "Str0ngP@ssw0rd!";
 
     /**
      * Password auth with an email identifier, plus the public client the test owns — wired to the
@@ -43,40 +45,48 @@ class SignUpWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
     }
 
     @Test
-    void signsUpAndExchangesCodeForTokens() throws Exception {
+    void signsInAsAPreviouslySignedUpUser() throws Exception {
         List<FlowStep.Type> steps = new ArrayList<>();
         try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(CLIENT_ID)
                         .withScopes("openid");
                 SympauthyContainer sympauthy = new SympauthyContainer()
                         .withConfig(config(registry))
                         .withFlows(registry)) {
-            InteractiveFlow flow = registry.newFlow()
-                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
+            InteractiveFlow signUp = registry.newFlow()
+                    .withSignUpHandler(configuration -> Map.of("email", EMAIL, "password", PASSWORD))
+                    .withStepListener(step -> steps.add(step.type()));
+            InteractiveFlow signIn = registry.newFlow()
+                    .withSignInHandler(configuration -> Credentials.of(EMAIL, PASSWORD))
                     .withStepListener(step -> steps.add(step.type()));
             try {
                 sympauthy.start();
 
-                AuthorizationResult result = flow.run();
+                // 1. Sign up to create the user, and remember who was created.
+                TokenResponse signUpTokens = signUp.run().exchange();
+                String signUpSubject = subjectOf(signUpTokens);
+                assertNotNull(signUpSubject, "sign-up id_token should identify a subject");
 
-                assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED), steps);
-                assertNotNull(result.code(), "should receive an authorization code");
+                // 2. Sign in as that user, in a fresh browser session (no lingering sign-up cookie).
+                TokenResponse signInTokens = signIn.run().exchange();
+                String signInSubject = subjectOf(signInTokens);
 
-                TokenResponse tokens = result.exchange();
-                assertNotNull(tokens.accessToken(), "token response should carry an access token");
-                assertNotNull(tokens.idToken(), "the openid scope should yield an id_token");
-
-                JWTClaimsSet claims = SignedJWT.parse(tokens.idToken()).getJWTClaimsSet();
-                assertEquals(sympauthy.getIssuerUrl(), claims.getIssuer(),
-                        "id_token should be issued by this container");
-                assertTrue(claims.getAudience().contains(CLIENT_ID),
-                        "id_token audience should be the client, was: " + claims.getAudience());
-                assertNotNull(claims.getSubject(), "id_token should identify a subject");
+                assertEquals(List.of(
+                                FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED,
+                                FlowStep.Type.SIGN_IN, FlowStep.Type.COMPLETED),
+                        steps, "sign-up should run first, then the sign-in path");
+                assertEquals(signUpSubject, signInSubject,
+                        "sign-in should authenticate the user created at sign-up");
             } catch (Throwable failure) {
                 System.out.println("=== SYMPAUTHY CONTAINER LOGS ===");
                 System.out.println(safeLogs(sympauthy));
                 throw failure;
             }
         }
+    }
+
+    private static String subjectOf(TokenResponse tokens) throws ParseException {
+        assertNotNull(tokens.idToken(), "the openid scope should yield an id_token");
+        return SignedJWT.parse(tokens.idToken()).getJWTClaimsSet().getSubject();
     }
 
     private static String safeLogs(SympauthyContainer sympauthy) {
