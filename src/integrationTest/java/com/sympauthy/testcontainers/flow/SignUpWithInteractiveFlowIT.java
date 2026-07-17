@@ -1,11 +1,9 @@
-package com.sympauthy.testcontainers;
+package com.sympauthy.testcontainers.flow;
 
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
-import com.sympauthy.testcontainers.flow.AuthorizationResult;
-import com.sympauthy.testcontainers.flow.FlowStep;
-import com.sympauthy.testcontainers.flow.InteractiveFlow;
-import com.sympauthy.testcontainers.flow.TokenResponse;
+import com.sympauthy.testcontainers.AbstractSympauthyContainerIT;
+import com.sympauthy.testcontainers.SympauthyContainer;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -21,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the container with {@link SympauthyContainer#withFlow}, then SympAuthy redirects a browser through
  * the frontend's sign-up page to the client callback. The captured code is exchanged for tokens.
  */
-class InteractiveFlowIT extends AbstractSympauthyContainerIT {
+class SignUpWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
 
     private static final String CLIENT_ID = "test-app";
 

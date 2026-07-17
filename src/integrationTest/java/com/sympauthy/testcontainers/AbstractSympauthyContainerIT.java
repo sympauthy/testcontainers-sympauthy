@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * contributes), it does not appear unless the claim was genuinely applied. Asserting on it therefore
  * proves the configuration reached the server rather than merely that the container booted.
  */
-abstract class AbstractSympauthyContainerIT {
+public abstract class AbstractSympauthyContainerIT {
 
     /** Present in discovery only when the {@code email} claim has been enabled. */
     protected static final String EMAIL_CLAIM_MARKER = "email_verified";
