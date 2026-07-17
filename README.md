@@ -82,6 +82,64 @@ Highest wins: the container-managed issuer / root URL &gt; property overrides
 image's bundled defaults. `auth.issuer` and `urls.root` are always pinned by the container
 so the issuer stays reachable from host-side test code.
 
+## Driving the interactive flow
+
+The `com.sympauthy.testcontainers.flow` package drives SympAuthy's
+[interactive login flow](https://sympauthy.github.io/functional/interactive_flow.html)
+programmatically — from the OAuth authorize endpoint to an authorization code and tokens — without a
+browser. `InteractiveFlow` is a **mock of the flow frontend**: it stands up a small local HTTP server
+that plays the flow's pages (sign-in, collect-claims, …) plus the client's callback. SympAuthy still
+owns the orchestration — it decides, through the redirects it issues, which page comes next — while
+your callbacks "render" each page by submitting to the Flow API.
+
+Create the flow first (it binds a local port immediately), hand it to the container with `withFlow`,
+then start and `run()`:
+
+```java
+try (InteractiveFlow flow = InteractiveFlow.forClient("test-app")
+        .withScopes("openid")
+        .withSignUpHandler(config -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
+        .withStepListener(step -> System.out.println("reached " + step.type()));  // optional
+     SympauthyContainer sympauthy = new SympauthyContainer()
+        .withConfig(Map.of(
+            "auth",    Map.of("by-password", Map.of("enabled", true), "identifier-claims", List.of("email")),
+            "claims",  Map.of("email", Map.of("enabled", true)),
+            // You own the client — point it at the flow's callback and flow id:
+            "clients", Map.of("test-app", Map.of(
+                "public", true,
+                "authorizationFlow", flow.flowId(),
+                "allowed-grant-types", List.of("authorization_code"),
+                "allowed-scopes", List.of("openid"),
+                "allowed-redirect-uris", List.of(flow.redirectUri())))))
+        .withFlow(flow)) {   // contributes only the flows.<id> definition
+
+    sympauthy.start();
+
+    TokenResponse tokens = flow.run()   // -> AuthorizationResult (holds the authorization code)
+        .exchange();                    // -> TokenResponse (access_token, id_token, …)
+}
+```
+
+`withFlow(flow)` contributes only the `flows.<id>` definition (the mock frontend's pages), applied as
+program-argument overrides so it wins over any flow config you set elsewhere, and tells the flow the
+container's URLs. **You own the client:** give it `flow.clientId()`, set its `authorizationFlow` to
+`flow.flowId()`, and include `flow.redirectUri()` in its redirect URIs. Then `/authorize` redirects a
+redirect-following client through the mock frontend's pages to its `/callback`, which captures the
+code. Register only the pages a flow reaches — each callback is an independent functional interface:
+
+| Callback | Purpose |
+| ------------------------------------------- | ------------------------------------------------------------------ |
+| `withSignInHandler(SignInHandler)`          | supply credentials for an existing user |
+| `withSignUpHandler(SignUpHandler)`          | supply sign-up fields (password + identifier claims) for a new user |
+| `withClaimsHandler(ClaimsHandler)`          | supply values when the collect-claims page is reached |
+| `withStepListener(StepListener)`            | observe every page the flow passes through — does not influence it |
+
+`run()` returns an `AuthorizationResult` (the authorization code, plus `exchange()` for tokens). For
+lower-level access, `FlowApiClient` wraps each Flow API endpoint directly.
+
+> The frontend covers the password happy path (sign-in/sign-up → collect claims → code). Multi-factor
+> auth and enforced email/SMS validation raise `UnsupportedFlowStepException`.
+
 ## Requirements
 
 | Requirement       | Minimum version                                                                        |
