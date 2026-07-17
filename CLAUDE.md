@@ -85,54 +85,64 @@ Key invariants to preserve when editing:
 [Flow API](https://sympauthy.github.io/technical/api/flow.html), so a test can go from the authorize
 endpoint to an authorization code (and tokens) without a browser.
 
-**`InteractiveFlow` is a mock of the flow *frontend*, not a client.** It runs a small
-`com.sun.net.httpserver.HttpServer` that plays the flow's pages (`/sign-in`, `/collect-claims`,
-`/validate-claims`, `/error`) plus the client's `/callback`. SympAuthy owns the orchestration — it
-decides, via the `redirect_url` each Flow API call returns, which page comes next — while each mock
-page just calls the registered callback and submits to the Flow API. A redirect-**following** HTTP
-client ("browser") rides SympAuthy's 303s across the pages until `/callback` captures the code.
+**`InteractiveFlowRegistry` is a mock of the flow *frontend*, not a client.** It runs a small
+`com.sun.net.httpserver.HttpServer` that plays the flow's pages (`/sign-in`, `/sign-up`,
+`/collect-claims`, `/validate-claims`, `/error`) plus the client's `/callback`. One registry hosts one
+`flows.<id>` definition and one client but any number of `InteractiveFlow`s — each a single scripted
+run (a sign-up, a sign-in, …) minted with `registry.newFlow()`; the registry serves whichever flow's
+`run()` is currently executing. SympAuthy owns the orchestration — it decides, via the `redirect_url`
+each Flow API call returns, which page comes next — while each mock page just calls the running flow's
+callback and submits to the Flow API. A redirect-**following** HTTP client ("browser") rides
+SympAuthy's 303s across the pages until `/callback` captures the code.
 
 Lifecycle (the flow's page URLs must be in SympAuthy's startup config, so the server binds first):
-`InteractiveFlow.forClient(id)` (binds a local port) → `container.withFlow(flow)` (applies the flow's
-`flows.<id>` definition and calls `flow.attach(baseUrl, discoveryUrl)`; you supply the matching client)
-→
-`container.start()` → `flow.run()` → `AuthorizationResult` → `exchange()` → `TokenResponse`. The
-authorize/token endpoints are read from the **discovery document**, not hardcoded.
+`InteractiveFlowRegistry.forClient(id)` (binds a local port) → `registry.newFlow().with*Handler(...)`
+→ `container.withFlows(registry)` (applies the `flows.<id>` definition and calls
+`registry.attach(baseUrl, discoveryUrl)`; you supply the matching client) → `container.start()` →
+`flow.run()` → `AuthorizationResult` → `exchange()` → `TokenResponse`. Register a flow per run and run
+them in order — e.g. sign up, then sign in as that user (each `run()` uses a fresh browser session).
+The authorize/token endpoints are read from the **discovery document**, not hardcoded.
 
 Key points when extending:
 
-- **`SympauthyContainer.withFlow(InteractiveFlow)`** is the one place the core container depends on the
-  flow package (chosen for ergonomics). It contributes **only** the `flows.<id>` definition — applied
-  via `withProperties` (program-argument overrides) from `flow.flowProperties()`, so it wins over
-  caller-supplied flow config without erasing it. The **client is the caller's** to define
-  (`clients.<id>` with id `flow.clientId()`, `authorizationFlow` `flow.flowId()`, and
-  `allowed-redirect-uris` including `flow.redirectUri()`), along with the auth method and claims.
+- **`SympauthyContainer.withFlows(InteractiveFlowRegistry)`** is the one place the core container
+  depends on the flow package (chosen for ergonomics). It contributes **only** the `flows.<id>`
+  definition — applied via `withProperties` (program-argument overrides) from
+  `registry.flowProperties()`, so it wins over caller-supplied flow config without erasing it. The
+  **client is the caller's** to define (`clients.<id>` with id `registry.clientId()`,
+  `authorizationFlow` `registry.flowId()`, and `allowed-redirect-uris` including
+  `registry.redirectUri()`), along with the auth method and claims.
+- **Registry vs. flow split:** the `InteractiveFlowRegistry` owns the shared, container-facing state —
+  the HTTP server/port, `clientId`/`flowId`/`scopes`, `attach`/`flowProperties`, and the dispatch
+  routing; `InteractiveFlow` (same package, so the registry reads its package-private handler fields)
+  carries only the per-run callbacks and a `run()` that delegates to `registry.run(this)`.
 - **`FlowApiClient`** — the thin client each mock page uses (one method per Flow API endpoint,
   returning a parsed `FlowResponse`). It encapsulates the state transport: **GET carries the state as
   `?state=<jwt>`, POST carries it in an `Authorization: State <jwt>` header.** Public, for custom flows.
 - **Callbacks are segregated single-method interfaces** (`SignInHandler`, `SignUpHandler`,
-  `ClaimsHandler`, `ValidationCodeHandler`, `StepListener`), registered with `with*`. A page reached
-  without its handler throws; `StepListener` observes *every* page. Do not collapse the split.
+  `ClaimsHandler`, `ValidationCodeHandler`, `StepListener`), registered per `InteractiveFlow` with
+  `with*`. A page reached without its handler throws; `StepListener` observes *every* page. Do not
+  collapse the split.
 - **v1 covers the password happy path** (sign-in/sign-up → collect claims → code). The
   `/validate-claims` page throws `UnsupportedFlowStepException` (the seam for a future validation
   tier); MFA is not modelled.
-- **PKCE `S256` is always sent**; `withFlow` generates a **public** client, so token exchange uses the
-  verifier only (no secret).
+- **PKCE `S256` is always sent**; the registry drives a **public** client (no `client_secret`), so
+  token exchange uses the verifier only.
 - **`JsonCodec` is the only class that touches the JSON parser.** It wraps `minimal-json`, which the
   Shadow plugin relocates into `com.sympauthy.testcontainers.internal.json` — swapping parsers is a
   one-file change.
 - **Unit tests are Docker-free** (`src/test/java/.../flow/`): the mock frontend runs against a stub
   SympAuthy (the in-JVM `TestFlowServer`) whose `/authorize` redirects to the frontend's page URLs and
-  whose Flow API returns scripted `redirect_url`s. `InteractiveFlowIT` boots a real container and wires
-  the frontend with `withFlow`.
+  whose Flow API returns scripted `redirect_url`s (`InteractiveFlowTest`). `SignUpWithInteractiveFlowIT`
+  and `SignInWithInteractiveFlowIT` boot a real container and wire the frontend with `withFlows`.
 - **How the redirects flow (verified):** with the flow's page URLs pointing at the mock frontend,
   `/authorize` 303-redirects the browser to `<frontend>/sign-in?state=<jwt>`; each page's Flow API call
   returns the next `redirect_url` (another frontend page, or the client `/callback?code=`). The browser
   hits SympAuthy only at `/authorize`; the frontend pages call the Flow API server-side on the
   container's base URL. SympAuthy's flow keys are **flat** and validated at startup
-  (`flows.<id>.{type, sign-in, collect-claims, validate-claims, error}` must all be present, else
-  `/authorize` returns HTTP 500 `config.invalid` — the container still boots, the readiness printer
-  only logs the errors).
+  (`flows.<id>.{type, sign-in, sign-up, collect-claims, validate-claims, error}` must all be present,
+  else `/authorize` returns HTTP 500 `config.invalid` — the container still boots, the readiness
+  printer only logs the errors).
 
 ## Dependency versioning
 
@@ -154,4 +164,4 @@ inherits no JSON dependency and cannot hit a version clash. Prefer this shade-an
 over exposing a third-party dependency when adding one. Verify after changes: `jar tf` on the built
 jar shows classes under `internal/json/` (not the original package), and
 `generatePomFileForMavenPublication` shows only Testcontainers. `nimbus-jose-jwt` is a **test-only**
-dependency (parses id_tokens in `InteractiveFlowIT`); it is neither shaded nor published.
+dependency (parses id_tokens in the interactive-flow ITs); it is neither shaded nor published.

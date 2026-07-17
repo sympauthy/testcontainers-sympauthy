@@ -1,6 +1,6 @@
 package com.sympauthy.testcontainers;
 
-import com.sympauthy.testcontainers.flow.InteractiveFlow;
+import com.sympauthy.testcontainers.flow.InteractiveFlowRegistry;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
@@ -300,27 +300,27 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
     }
 
     /**
-     * Wires an {@link InteractiveFlow} mock frontend into this container: SympAuthy's flow definition
-     * is pointed at the flow's pages, and the flow is told this container's URLs so
-     * {@link InteractiveFlow#run()} can drive it after {@link #start()}.
+     * Wires an {@link InteractiveFlowRegistry} mock frontend into this container: SympAuthy's flow
+     * definition is pointed at the registry's pages, and the registry is told this container's URLs so
+     * its flows can be driven after {@link #start()}.
      *
      * <p>Only the {@code flows.<id>} definition is contributed here (applied via
      * {@link #withProperties(Map)}, so it wins over any flow config supplied through config files or
      * environment profiles without erasing the rest). The <b>client is yours to configure</b>: define a
-     * {@code clients.<id>} whose id is {@link InteractiveFlow#clientId()}, whose
-     * {@code authorizationFlow} is {@link InteractiveFlow#flowId()}, and whose
-     * {@code allowed-redirect-uris} includes {@link InteractiveFlow#redirectUri()} — along with the
-     * authentication method (e.g. password) and claims.
+     * {@code clients.<id>} whose id is {@link InteractiveFlowRegistry#clientId()}, whose
+     * {@code authorizationFlow} is {@link InteractiveFlowRegistry#flowId()}, and whose
+     * {@code allowed-redirect-uris} includes {@link InteractiveFlowRegistry#redirectUri()} — along with
+     * the authentication method (e.g. password) and claims.
      *
      * <p>Because the flow's page URLs must be baked into SympAuthy's startup configuration, create the
-     * flow (with {@link InteractiveFlow#forClient(String)}) <em>before</em> calling this.
+     * registry (with {@link InteractiveFlowRegistry#forClient(String)}) <em>before</em> calling this.
      *
-     * @param flow the mock flow frontend
+     * @param registry the mock flow frontend
      * @return this container, for chaining
      */
-    public SympauthyContainer withFlow(InteractiveFlow flow) {
-        flow.attach(getBaseUrl(), getOpenIdConfigurationUrl());
-        return withProperties(flow.flowProperties());
+    public SympauthyContainer withFlows(InteractiveFlowRegistry registry) {
+        registry.attach(getBaseUrl(), getOpenIdConfigurationUrl());
+        return withProperties(registry.flowProperties());
     }
 
     @Override

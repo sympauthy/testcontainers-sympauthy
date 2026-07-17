@@ -25,15 +25,15 @@ class InteractiveFlowTest {
     void drivesSignUpToACodeAndTokens() {
         List<FlowStep.Type> steps = new ArrayList<>();
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlow flow = InteractiveFlow.forClient("test-app")
-                        .withScopes("openid")
-                        .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
-                        .withStepListener(step -> steps.add(step.type()))) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
+                    .withStepListener(step -> steps.add(step.type()));
 
-            registerSympAuthy(sympauthy, flow);
+            registerSympAuthy(sympauthy, registry);
             sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
-                    TestFlowServer.Response.json(200, redirectTo(flow.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
-            attach(flow, sympauthy);
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
+            attach(registry, sympauthy);
 
             AuthorizationResult result = flow.run();
 
@@ -58,20 +58,20 @@ class InteractiveFlowTest {
     void drivesCollectClaimsPage() {
         List<FlowStep.Type> steps = new ArrayList<>();
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlow flow = InteractiveFlow.forClient("test-app")
-                        .withScopes("openid")
-                        .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
-                        .withClaimsHandler(claims -> Map.of("given_name", "Ada"))
-                        .withStepListener(step -> steps.add(step.type()))) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
+                    .withClaimsHandler(claims -> Map.of("given_name", "Ada"))
+                    .withStepListener(step -> steps.add(step.type()));
 
-            registerSympAuthy(sympauthy, flow);
+            registerSympAuthy(sympauthy, registry);
             sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
-                    TestFlowServer.Response.json(200, redirectTo(flow.frontendUrl() + "/collect-claims?state=" + FLOW_STATE)));
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/collect-claims?state=" + FLOW_STATE)));
             sympauthy.route("GET", "/api/v1/flow/claims", request -> TestFlowServer.Response.json(200,
                     "{\"claims\":[{\"id\":\"given_name\",\"required\":true,\"name\":\"Given name\",\"type\":\"string\"}]}"));
             sympauthy.route("POST", "/api/v1/flow/claims", request ->
-                    TestFlowServer.Response.json(200, redirectTo(flow.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
-            attach(flow, sympauthy);
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
+            attach(registry, sympauthy);
 
             AuthorizationResult result = flow.run();
 
@@ -84,14 +84,14 @@ class InteractiveFlowTest {
     @Test
     void abortsWhenSympAuthyRedirectsToTheErrorPage() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlow flow = InteractiveFlow.forClient("test-app")
-                        .withScopes("openid")
-                        .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
 
-            registerSympAuthy(sympauthy, flow);
+            registerSympAuthy(sympauthy, registry);
             sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
-                    TestFlowServer.Response.json(200, redirectTo(flow.frontendUrl() + "/error?error=nope")));
-            attach(flow, sympauthy);
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/error?error=nope")));
+            attach(registry, sympauthy);
 
             assertThrows(FlowException.class, flow::run);
         }
@@ -100,13 +100,14 @@ class InteractiveFlowTest {
     @Test
     void failsWhenSympAuthyRedirectsToAnUnsupportedPage() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlow flow = InteractiveFlow.forClient("test-app").withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow();
 
-            registerSympAuthy(sympauthy, flow);
+            registerSympAuthy(sympauthy, registry);
             // The authorization server sends the browser to a flow page the mock frontend does not serve.
             sympauthy.route("GET", "/api/oauth2/authorize", request ->
-                    TestFlowServer.Response.seeOther(flow.frontendUrl() + "/mfa?state=" + FLOW_STATE));
-            attach(flow, sympauthy);
+                    TestFlowServer.Response.seeOther(registry.frontendUrl() + "/mfa?state=" + FLOW_STATE));
+            attach(registry, sympauthy);
 
             UnsupportedFlowStepException failure = assertThrows(UnsupportedFlowStepException.class, flow::run);
             assertTrue(failure.getMessage().contains("/mfa"), failure.getMessage());
@@ -116,10 +117,11 @@ class InteractiveFlowTest {
     @Test
     void failsWhenNoAuthenticationHandlerIsConfigured() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlow flow = InteractiveFlow.forClient("test-app").withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow();
 
-            registerSympAuthy(sympauthy, flow);
-            attach(flow, sympauthy);
+            registerSympAuthy(sympauthy, registry);
+            attach(registry, sympauthy);
 
             assertThrows(FlowException.class, flow::run);
         }
@@ -127,27 +129,26 @@ class InteractiveFlowTest {
 
     @Test
     void failsWhenNotAttachedToAContainer() {
-        try (InteractiveFlow flow = InteractiveFlow.forClient("test-app")
-                .withScopes("openid")
-                .withSignUpHandler(configuration -> Map.of())) {
+        try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow().withSignUpHandler(configuration -> Map.of());
             assertThrows(IllegalStateException.class, flow::run);
         }
     }
 
-    private static void registerSympAuthy(TestFlowServer sympauthy, InteractiveFlow flow) {
+    private static void registerSympAuthy(TestFlowServer sympauthy, InteractiveFlowRegistry registry) {
         sympauthy.route("GET", "/.well-known/openid-configuration", request ->
                 TestFlowServer.Response.json(200, discovery(sympauthy.baseUrl())));
         // /authorize sends the browser to the mock frontend's sign-in page with a state token.
         sympauthy.route("GET", "/api/oauth2/authorize", request ->
-                TestFlowServer.Response.seeOther(flow.frontendUrl() + "/sign-in?state=" + FLOW_STATE));
+                TestFlowServer.Response.seeOther(registry.frontendUrl() + "/sign-in?state=" + FLOW_STATE));
         sympauthy.route("GET", "/api/v1/flow/configuration", request -> TestFlowServer.Response.json(200,
                 "{\"features\":{\"password_sign_in\":true,\"sign_up_enabled\":true},\"claims\":[]}"));
         sympauthy.route("POST", "/api/oauth2/token", request -> TestFlowServer.Response.json(200,
                 "{\"access_token\":\"at\",\"id_token\":\"it\",\"token_type\":\"Bearer\",\"expires_in\":3600}"));
     }
 
-    private static void attach(InteractiveFlow flow, TestFlowServer sympauthy) {
-        flow.attach(sympauthy.baseUrl(), sympauthy.baseUrl() + "/.well-known/openid-configuration");
+    private static void attach(InteractiveFlowRegistry registry, TestFlowServer sympauthy) {
+        registry.attach(sympauthy.baseUrl(), sympauthy.baseUrl() + "/.well-known/openid-configuration");
     }
 
     private static String discovery(String base) {
