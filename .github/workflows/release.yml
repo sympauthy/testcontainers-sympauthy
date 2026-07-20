@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the git tag + GitHub release
+  packages: write   # publish to GitHub Packages (implies read for the dup-check)
+
+# Never run two releases at once; don't cancel an in-flight release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # (a) Resolve version from gradle.properties, refuse SNAPSHOT.
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          version="$(grep -E '^version=' gradle.properties | head -1 | cut -d= -f2 | xargs)"
+          if [ -z "$version" ]; then
+            echo "::error::No version found in gradle.properties"; exit 1
+          fi
+          if [[ "$version" == *-SNAPSHOT ]]; then
+            echo "::error::Refusing to release a SNAPSHOT ($version). Set a release version in gradle.properties."; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version"
+
+      # (b) Fail if already published to GitHub Packages.
+      - name: Check version not already released
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          url="https://maven.pkg.github.com/${{ github.repository }}/com/sympauthy/testcontainers-sympauthy/${v}/testcontainers-sympauthy-${v}.pom"
+          code="$(curl -s -o /dev/null -w '%{http_code}' -u "${{ github.actor }}:${GITHUB_TOKEN}" "$url")"
+          case "$code" in
+            200) echo "::error::Version $v is already published to GitHub Packages"; exit 1 ;;
+            404) echo "Version $v not published yet (HTTP 404) — proceeding" ;;
+            *)   echo "::error::Unexpected HTTP $code checking the registry"; exit 1 ;;
+          esac
+
+      # (c) Run BOTH suites, reusing the existing composite action (JDK 17 + Gradle setup included).
+      - name: Run unit and integration tests
+        uses: ./.github/actions/test
+        with:
+          unit: "true"
+          integration: "true"
+
+      # (d) Build + publish the artifact to GitHub Packages.
+      #     The JDK/Gradle setup from the test action above persists for this step.
+      - name: Publish to GitHub Packages
+        shell: bash
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew publishMavenPublicationToGitHubPackagesRepository
+
+      # (e) Tag + create the GitHub release (only reached on a successful publish).
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          gh release create "v$v" \
+            --title "v$v" \
+            --target "${{ github.sha }}" \
+            --generate-notes \
+            build/libs/testcontainers-sympauthy-"$v".jar \
+            build/libs/testcontainers-sympauthy-"$v"-sources.jar \
+            build/libs/testcontainers-sympauthy-"$v"-javadoc.jar

@@ -132,4 +132,17 @@ publishing {
             }
         }
     }
+
+    repositories {
+        // Publish target for the release workflow. Credentials come from the standard GitHub Actions
+        // env vars, so local builds simply can't publish (which is correct) while the workflow can.
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/sympauthy/testcontainers-sympauthy")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
+            }
+        }
+    }
 }
