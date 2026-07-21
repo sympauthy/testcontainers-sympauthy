@@ -205,12 +205,15 @@ try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-
 
     InteractiveFlow signUp = registry.newFlow()
         .withSignUpHandler(config -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
-        .withStepListener(step -> System.out.println("reached " + step.type()));  // optional
+        .withStepListener(step -> System.out.println("reached " + step.type()));  // optional, react live
 
     sympauthy.start();
 
     TokenResponse tokens = signUp.run()   // -> AuthorizationResult (holds the authorization code)
         .exchange();                      // -> TokenResponse (access_token, id_token, …)
+
+    // Assert on the path taken, no listener needed:
+    assertEquals(List.of(SIGN_UP, COMPLETED), signUp.stepTypes());
 }
 ```
 
@@ -227,10 +230,12 @@ interface:
 | `withSignInHandler(SignInHandler)`          | supply credentials for an existing user |
 | `withSignUpHandler(SignUpHandler)`          | supply sign-up fields (password + identifier claims) for a new user |
 | `withClaimsHandler(ClaimsHandler)`          | supply values when the collect-claims page is reached |
-| `withStepListener(StepListener)`            | observe every page the flow passes through — does not influence it |
+| `withStepListener(StepListener)`            | react to every page as the flow reaches it (read its `data()`, call the Flow API) — does not influence it |
 
-`run()` returns an `AuthorizationResult` (the authorization code, plus `exchange()` for tokens). For
-lower-level access, `FlowApiClient` wraps each Flow API endpoint directly.
+`run()` returns an `AuthorizationResult` (the authorization code, plus `exchange()` for tokens). To
+assert on the path a flow took, read `flow.stepTypes()` — the `List<FlowStep.Type>` it traversed (e.g.
+`[SIGN_UP, COMPLETED]`) — instead of accumulating them through a `StepListener`. For lower-level
+access, `FlowApiClient` wraps each Flow API endpoint directly.
 
 Register a flow per run and run them in order to chain scenarios against one container — for example a
 sign-up that creates a user, then a sign-in as that same user (both share the one client and flow):

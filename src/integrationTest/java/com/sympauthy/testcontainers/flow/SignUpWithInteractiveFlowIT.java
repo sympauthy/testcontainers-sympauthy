@@ -6,7 +6,6 @@ import com.sympauthy.testcontainers.AbstractSympauthyContainerIT;
 import com.sympauthy.testcontainers.SympauthyContainer;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -44,21 +43,19 @@ class SignUpWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
 
     @Test
     void signsUpAndExchangesCodeForTokens() throws Exception {
-        List<FlowStep.Type> steps = new ArrayList<>();
         try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(CLIENT_ID)
                         .withScopes("openid");
                 SympauthyContainer sympauthy = new SympauthyContainer()
                         .withConfig(config(registry))
                         .withFlows(registry)) {
             InteractiveFlow flow = registry.newFlow()
-                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"))
-                    .withStepListener(step -> steps.add(step.type()));
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"));
             try {
                 sympauthy.start();
 
                 AuthorizationResult result = flow.run();
 
-                assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED), steps);
+                assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED), flow.stepTypes());
                 assertNotNull(result.code(), "should receive an authorization code");
 
                 TokenResponse tokens = result.exchange();

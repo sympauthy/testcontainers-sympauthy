@@ -6,7 +6,6 @@ import com.sympauthy.testcontainers.SympauthyContainer;
 import org.junit.jupiter.api.Test;
 
 import java.text.ParseException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -46,18 +45,15 @@ class SignInWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
 
     @Test
     void signsInAsAPreviouslySignedUpUser() throws Exception {
-        List<FlowStep.Type> steps = new ArrayList<>();
         try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(CLIENT_ID)
                         .withScopes("openid");
                 SympauthyContainer sympauthy = new SympauthyContainer()
                         .withConfig(config(registry))
                         .withFlows(registry)) {
             InteractiveFlow signUp = registry.newFlow()
-                    .withSignUpHandler(configuration -> Map.of("email", EMAIL, "password", PASSWORD))
-                    .withStepListener(step -> steps.add(step.type()));
+                    .withSignUpHandler(configuration -> Map.of("email", EMAIL, "password", PASSWORD));
             InteractiveFlow signIn = registry.newFlow()
-                    .withSignInHandler(configuration -> Credentials.of(EMAIL, PASSWORD))
-                    .withStepListener(step -> steps.add(step.type()));
+                    .withSignInHandler(configuration -> Credentials.of(EMAIL, PASSWORD));
             try {
                 sympauthy.start();
 
@@ -65,15 +61,13 @@ class SignInWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
                 TokenResponse signUpTokens = signUp.run().exchange();
                 String signUpSubject = subjectOf(signUpTokens);
                 assertNotNull(signUpSubject, "sign-up id_token should identify a subject");
+                assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED), signUp.stepTypes());
 
                 // 2. Sign in as that user, in a fresh browser session (no lingering sign-up cookie).
                 TokenResponse signInTokens = signIn.run().exchange();
                 String signInSubject = subjectOf(signInTokens);
+                assertEquals(List.of(FlowStep.Type.SIGN_IN, FlowStep.Type.COMPLETED), signIn.stepTypes());
 
-                assertEquals(List.of(
-                                FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED,
-                                FlowStep.Type.SIGN_IN, FlowStep.Type.COMPLETED),
-                        steps, "sign-up should run first, then the sign-in path");
                 assertEquals(signUpSubject, signInSubject,
                         "sign-in should authenticate the user created at sign-up");
             } catch (Throwable failure) {

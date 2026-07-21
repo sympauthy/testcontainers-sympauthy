@@ -179,6 +179,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
                     "Registry is not attached to a container; call SympauthyContainer.withFlows(registry) first");
         }
         active = flow;
+        flow.steps.clear();
         capturedCode = null;
         capturedState = null;
         failure = null;
@@ -314,8 +315,10 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
     }
 
     private void emit(FlowStep.Type type, Map<String, Object> data) {
+        FlowStep step = new FlowStep(type, data);
+        active.steps.add(step);
         if (active.stepListener != null) {
-            active.stepListener.onStep(new FlowStep(type, data));
+            active.stepListener.onStep(step);
         }
     }
 

@@ -123,6 +123,11 @@ Key points when extending:
   `ClaimsHandler`, `ValidationCodeHandler`, `StepListener`), registered per `InteractiveFlow` with
   `with*`. A page reached without its handler throws; `StepListener` observes *every* page. Do not
   collapse the split.
+- **Traversed steps are accumulated on the flow.** The registry's `emit(...)` appends each `FlowStep`
+  to the running flow (a package-private `CopyOnWriteArrayList`, reset at the start of each `run()`)
+  *before* notifying the listener, and `InteractiveFlow.stepTypes()` exposes the `List<FlowStep.Type>`
+  traversed. That is the boilerplate-free way to assert on the path taken; `StepListener` stays for
+  reacting to a step as it happens (reading its `data()`, calling the Flow API mid-flow).
 - **v1 covers the password happy path** (sign-in/sign-up → collect claims → code). The
   `/validate-claims` page throws `UnsupportedFlowStepException` (the seam for a future validation
   tier); MFA is not modelled.

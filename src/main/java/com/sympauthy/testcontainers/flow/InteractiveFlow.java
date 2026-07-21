@@ -1,5 +1,8 @@
 package com.sympauthy.testcontainers.flow;
 
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
 /**
  * A single scripted run of SympAuthy's interactive flow — a sign-up, a sign-in, … — served by an
  * {@link InteractiveFlowRegistry}. Mint one with {@link InteractiveFlowRegistry#newFlow()}, register
@@ -25,6 +28,10 @@ public final class InteractiveFlow {
     ClaimsHandler claimsHandler;
     ValidationCodeHandler validationCodeHandler;
     StepListener stepListener;
+
+    // Steps traversed during run(), appended by the registry's emit() on the server threads and read
+    // back on the run()/test thread — hence a thread-safe list.
+    final List<FlowStep> steps = new CopyOnWriteArrayList<>();
 
     InteractiveFlow(InteractiveFlowRegistry registry) {
         this.registry = registry;
@@ -58,5 +65,15 @@ public final class InteractiveFlow {
     /** Drives this flow to the client callback and returns the captured authorization code. */
     public AuthorizationResult run() {
         return registry.run(this);
+    }
+
+    /**
+     * The step types this flow traversed, in order, for its most recent {@link #run()} — e.g.
+     * {@code [SIGN_UP, COMPLETED]}. Lets a test assert on the path taken without wiring up a
+     * {@link StepListener}; the listener remains for reacting to a step as it happens or reading its
+     * {@link FlowStep#data()}.
+     */
+    public List<FlowStep.Type> stepTypes() {
+        return steps.stream().map(FlowStep::type).toList();
     }
 }

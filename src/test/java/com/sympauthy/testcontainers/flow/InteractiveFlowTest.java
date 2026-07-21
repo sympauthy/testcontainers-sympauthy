@@ -23,12 +23,10 @@ class InteractiveFlowTest {
 
     @Test
     void drivesSignUpToACodeAndTokens() {
-        List<FlowStep.Type> steps = new ArrayList<>();
         try (TestFlowServer sympauthy = new TestFlowServer();
                 InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow()
-                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
-                    .withStepListener(step -> steps.add(step.type()));
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
 
             registerSympAuthy(sympauthy, registry);
             sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
@@ -38,7 +36,7 @@ class InteractiveFlowTest {
             AuthorizationResult result = flow.run();
 
             assertEquals(CODE, result.code());
-            assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED), steps);
+            assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED), flow.stepTypes());
 
             // State transport across the mock frontend's server-side Flow API calls.
             assertEquals(FLOW_STATE, sympauthy.firstRequest("GET", "/api/v1/flow/configuration").stateQueryParam());
@@ -56,13 +54,15 @@ class InteractiveFlowTest {
 
     @Test
     void drivesCollectClaimsPage() {
-        List<FlowStep.Type> steps = new ArrayList<>();
+        // Also exercises StepListener: it observes every step as it happens (with its data) and stays
+        // in sync with the flow's own stepTypes() history.
+        List<FlowStep> observed = new ArrayList<>();
         try (TestFlowServer sympauthy = new TestFlowServer();
                 InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow()
                     .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
                     .withClaimsHandler(claims -> Map.of("given_name", "Ada"))
-                    .withStepListener(step -> steps.add(step.type()));
+                    .withStepListener(observed::add);
 
             registerSympAuthy(sympauthy, registry);
             sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
@@ -76,7 +76,11 @@ class InteractiveFlowTest {
             AuthorizationResult result = flow.run();
 
             assertEquals(CODE, result.code());
-            assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.CLAIMS, FlowStep.Type.COMPLETED), steps);
+            assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.CLAIMS, FlowStep.Type.COMPLETED), flow.stepTypes());
+            // The listener sees the same sequence and can read each step's raw data.
+            assertEquals(flow.stepTypes(), observed.stream().map(FlowStep::type).toList());
+            assertTrue(observed.stream().anyMatch(step ->
+                    step.type() == FlowStep.Type.CLAIMS && step.data().containsKey("claims")));
             assertTrue(sympauthy.firstRequest("POST", "/api/v1/flow/claims").body().contains("given_name"));
         }
     }
