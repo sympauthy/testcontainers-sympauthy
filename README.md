@@ -251,6 +251,37 @@ TokenResponse tokens = signIn.run().exchange();   // signs in as that user
 > The frontend covers the password happy path (sign-in/sign-up → collect claims → code). Multi-factor
 > auth and enforced email/SMS validation raise `UnsupportedFlowStepException`.
 
+### Confidential clients
+
+`forClient(id)` drives a **public** client (PKCE only). To authenticate as a **confidential** client —
+so an issued token can later be presented to endpoints that require client authentication (e.g. token
+revocation or introspection) — pass a `Client`. The token exchange then sends the secret, as
+`client_secret_post` by default or `client_secret_basic`:
+
+```java
+InteractiveFlowRegistry registry = InteractiveFlowRegistry
+    .forClient(Client.confidentialClient("test-app", "s3cr3t"))  // + Client.ClientAuthMethod.BASIC for HTTP Basic
+    .withScopes("openid");
+```
+
+Declare the client as confidential and reuse the same secret via `registry.clientSecret()` so the sent
+and configured values stay in sync (the config key is `secret`; `public` defaults to `false`):
+
+```java
+"clients", Map.of("test-app", Map.of(
+    "public", false,
+    "secret", registry.clientSecret(),          // the value the exchange will send
+    "authorizationFlow", registry.flowId(),
+    "allowed-grant-types", List.of("authorization_code"),
+    "allowed-scopes", List.of("openid"),
+    "allowed-redirect-uris", List.of(registry.redirectUri())))
+```
+
+Everything else is unchanged — `run().exchange()` authenticates the client at the token endpoint. The
+same `Client` also backs `TokenClient`, whose `clientCredentials(scopes…)` grant obtains a token with
+**no interactive flow** (e.g. to call SympAuthy's Client API); `registry.client()` hands you the `Client`
+to build one.
+
 ## Creating an admin user (Admin API)
 
 SympAuthy's [Admin API](https://sympauthy.github.io/technical/api/admin.html) (`/api/v1/admin/*`)
