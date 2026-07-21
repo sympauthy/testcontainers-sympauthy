@@ -29,6 +29,10 @@ public final class InteractiveFlow {
     ValidationCodeHandler validationCodeHandler;
     StepListener stepListener;
 
+    // When set, sent as the invitation_token query parameter on the authorize request that starts this
+    // run, redeeming a (bootstrap) invitation as part of the sign-up.
+    String invitationToken;
+
     // Steps traversed during run(), appended by the registry's emit() on the server threads and read
     // back on the run()/test thread — hence a thread-safe list.
     final List<FlowStep> steps = new CopyOnWriteArrayList<>();
@@ -59,6 +63,21 @@ public final class InteractiveFlow {
 
     public InteractiveFlow withStepListener(StepListener listener) {
         this.stepListener = listener;
+        return this;
+    }
+
+    /**
+     * Redeems an invitation on this run: {@code token} is sent as the {@code invitation_token} query
+     * parameter on the authorize request, binding the invitation to the sign-up. Use it with a
+     * {@link #withSignUpHandler(SignUpHandler) sign-up handler} to register the invited user — e.g. the
+     * first admin created from a bootstrap invitation (see
+     * {@link com.sympauthy.testcontainers.SympauthyContainer#getBootstrapInvitationToken(String)}).
+     *
+     * @param token the raw invitation token
+     * @return this flow, for chaining
+     */
+    public InteractiveFlow withInvitationToken(String token) {
+        this.invitationToken = token;
         return this;
     }
 

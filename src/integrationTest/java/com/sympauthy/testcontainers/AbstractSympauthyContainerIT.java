@@ -48,4 +48,26 @@ public abstract class AbstractSympauthyContainerIT {
                 "issuer should match the container's URL");
         return response.body();
     }
+
+    /**
+     * Issues a GET against any API path on the container, optionally bearing an access token. Passing a
+     * {@code null} token sends the request unauthenticated, so a test can assert an endpoint is genuinely
+     * protected. Works for any bearer-authenticated API — the Admin API ({@code /api/v1/admin/*}), the
+     * client API, and so on.
+     *
+     * @param sympauthy   the running container
+     * @param path        the request path (e.g. {@code /api/v1/admin/users})
+     * @param accessToken the bearer access token, or {@code null} to send no Authorization header
+     * @return the HTTP response
+     */
+    protected static HttpResponse<String> apiGet(SympauthyContainer sympauthy, String path, String accessToken)
+            throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(sympauthy.getBaseUrl() + path))
+                .header("Accept", "application/json")
+                .GET();
+        if (accessToken != null) {
+            request.header("Authorization", "Bearer " + accessToken);
+        }
+        return HttpClient.newHttpClient().send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
 }

@@ -1,5 +1,6 @@
 package com.sympauthy.testcontainers;
 
+import com.sympauthy.testcontainers.flow.InteractiveFlowRegistry;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.utility.MountableFile;
 
@@ -13,6 +14,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -184,6 +186,85 @@ class SympauthyContainerTest {
                 .withEnvironments("default", "admin", "google");
 
         assertEquals("default,admin,google", envValue(container, "MICRONAUT_ENVIRONMENTS"));
+    }
+
+    @Test
+    void withAdminAddsTheAdminEnvironmentIdempotently() {
+        SympauthyContainer container = new SympauthyContainer().withAdmin().withAdmin();
+
+        // Unlike withEnvironments, withAdmin keeps default and adds admin once (no duplicates).
+        assertEquals("default,admin", envValue(container, "MICRONAUT_ENVIRONMENTS"));
+    }
+
+    @Test
+    void bootstrapInvitationBecomesProgramArguments() {
+        SympauthyContainer container = new SympauthyContainer()
+                .withBootstrapInvitation("first-admin", "admin", Map.of("is_sympauthy_admin", "true"));
+
+        List<String> command = commandOf(container);
+        assertTrue(command.contains("-invitations.first-admin.audience=admin"), command.toString());
+        assertTrue(
+                command.contains("-invitations.first-admin.claims.is_sympauthy_admin=true"),
+                command.toString());
+        // No url-template is set, so SympAuthy logs the raw token rather than a registration URL.
+        assertFalse(
+                command.stream().anyMatch(part -> part.startsWith("-invitations.first-admin.url-template=")),
+                command.toString());
+    }
+
+    @Test
+    void bootstrapInvitationWithoutClaimsSetsOnlyTheAudience() {
+        SympauthyContainer container = new SympauthyContainer()
+                .withBootstrapInvitation("guest", "app");
+
+        List<String> command = commandOf(container);
+        assertTrue(command.contains("-invitations.guest.audience=app"), command.toString());
+        assertFalse(
+                command.stream().anyMatch(part -> part.startsWith("-invitations.guest.claims.")),
+                command.toString());
+    }
+
+    @Test
+    void adminClientIsMountedAsAConfigFile() {
+        try (InteractiveFlowRegistry registry =
+                InteractiveFlowRegistry.forClient("admin-app").withFlowId("admin-flow")) {
+            SympauthyContainer container = new SympauthyContainer()
+                    .withAdmin()
+                    .withAdminClient(registry, "admin:users:read");
+
+            // The client carries nested lists (redirect-uris, scopes), so it goes through the
+            // config-file channel rather than program arguments.
+            assertEquals("/config/inline-0.json", envValue(container, "MICRONAUT_CONFIG_FILES"));
+            List<String> command = commandOf(container);
+            assertFalse(
+                    command.stream().anyMatch(part -> part.startsWith("-clients.")),
+                    command.toString());
+        }
+    }
+
+    @Test
+    void parsesTheRawTokenLogForm() {
+        String logs = "12:00:00 INFO  BootstrapInvitationManager - Bootstrap invitation 'custom' "
+                + "created for audience 'app'. Token: abc123_DEF-456\n";
+
+        assertEquals("abc123_DEF-456", SympauthyContainer.parseBootstrapToken(logs, "custom"));
+    }
+
+    @Test
+    void parsesTheRegistrationUrlLogForm() {
+        String logs = "12:00:00 INFO  BootstrapInvitationManager - Bootstrap invitation 'first-admin' "
+                + "created for audience 'admin'. Registration URL: "
+                + "http://localhost:49172/admin/register?invitation_token=xyz789-TOK_en\n";
+
+        assertEquals("xyz789-TOK_en", SympauthyContainer.parseBootstrapToken(logs, "first-admin"));
+    }
+
+    @Test
+    void returnsNullWhenNoTokenIsLoggedForTheId() {
+        String logs = "Bootstrap invitation 'other' created for audience 'app'. Token: nope\n";
+
+        assertNull(SympauthyContainer.parseBootstrapToken(logs, "first-admin"));
+        assertNull(SympauthyContainer.parseBootstrapToken(null, "first-admin"));
     }
 
     @Test

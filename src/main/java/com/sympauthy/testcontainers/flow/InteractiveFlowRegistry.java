@@ -311,6 +311,9 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         params.put("state", oauthState);
         params.put("code_challenge", pkce.codeChallenge);
         params.put("code_challenge_method", pkce.method);
+        if (active.invitationToken != null) {
+            params.put("invitation_token", active.invitationToken);
+        }
         return params;
     }
 

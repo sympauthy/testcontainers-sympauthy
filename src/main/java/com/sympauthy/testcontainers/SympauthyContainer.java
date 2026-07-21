@@ -13,9 +13,14 @@ import java.net.ServerSocket;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * A {@link GenericContainer} that runs <a href="https://sympauthy.github.io/">SympAuthy</a>,
@@ -85,6 +90,15 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
     /** The Micronaut environment enabled by default: baseline config, no insecure features. */
     static final String DEFAULT_ENVIRONMENT = "default";
 
+    /** The Micronaut environment that turns on the Admin API/UI and its bundled resources. */
+    static final String ADMIN_ENVIRONMENT = "admin";
+
+    /** The audience the {@code admin} environment binds its API, claim and bootstrap invitation to. */
+    static final String ADMIN_AUDIENCE = "admin";
+
+    /** How long {@link #getBootstrapInvitationToken(String)} waits for the token to appear in the logs. */
+    private static final Duration BOOTSTRAP_TOKEN_TIMEOUT = Duration.ofSeconds(10);
+
     /** In-memory H2 datasource used when no external datasource is configured. */
     static final String IN_MEMORY_H2_URL =
             "r2dbc:h2:mem:///sympauthy;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE";
@@ -120,6 +134,9 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
 
     /** Monotonic counter used to give each mounted config file a unique in-container name. */
     private int configFileCounter = 0;
+
+    /** Ids of bootstrap invitations declared via {@link #withBootstrapInvitation(String, String, Map)}. */
+    private final Set<String> bootstrapInvitationIds = new LinkedHashSet<>();
 
     /** Creates a container using the default nightly SympAuthy image and an in-memory H2 database. */
     public SympauthyContainer() {
@@ -246,6 +263,32 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
     }
 
     /**
+     * Enables the {@code admin} Micronaut environment, which turns on SympAuthy's Admin API
+     * ({@code /api/v1/admin/*}) and UI and ships a ready-made admin setup: an {@code admin} audience
+     * (open sign-up disabled, invitations enabled), the {@code is_sympauthy_admin} boolean claim, a
+     * scope-granting rule mapping that claim to every admin scope, a public {@code admin} client, and a
+     * {@code first-admin} bootstrap invitation. Unlike {@link #withEnvironments(String...)}, this
+     * <em>adds</em> {@code admin} to the active environments (keeping {@code default}) rather than
+     * replacing them.
+     *
+     * <p>To actually reach the Admin API, create the first admin user by redeeming the
+     * {@code first-admin} bootstrap invitation: read its token with
+     * {@link #getBootstrapInvitationToken(String) getBootstrapInvitationToken("first-admin")} and drive
+     * a sign-up through an {@link InteractiveFlowRegistry} whose client is wired with
+     * {@link #withAdminClient(InteractiveFlowRegistry, String...)}, passing the token to
+     * {@link com.sympauthy.testcontainers.flow.InteractiveFlow#withInvitationToken(String)}. The
+     * resulting access token carries the admin scopes.
+     *
+     * @return this container, for chaining
+     */
+    public SympauthyContainer withAdmin() {
+        if (!environments.contains(ADMIN_ENVIRONMENT)) {
+            environments.add(ADMIN_ENVIRONMENT);
+        }
+        return this;
+    }
+
+    /**
      * Mounts a YAML or JSON configuration file into the container and adds it to
      * {@code MICRONAUT_CONFIG_FILES}. The file's extension is preserved so Micronaut infers the
      * format. Provide the file with {@link MountableFile#forClasspathResource(String)} or
@@ -321,6 +364,138 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
     public SympauthyContainer withFlows(InteractiveFlowRegistry registry) {
         registry.attach(getBaseUrl(), getOpenIdConfigurationUrl());
         return withProperties(registry.flowProperties());
+    }
+
+    /**
+     * Declares a <a href="https://sympauthy.github.io/functional/invitation.html#bootstrap-invitations">
+     * bootstrap invitation</a>: an invitation SympAuthy creates at startup — as long as no user has yet
+     * consented for {@code audience} — so the first user of that audience can self-register. Its token is
+     * logged and can be read back with {@link #getBootstrapInvitationToken(String)} once the container
+     * has started, then redeemed via the interactive flow.
+     *
+     * <p>The invitation is contributed as {@code invitations.<id>.*} program arguments. No
+     * {@code url-template} is set, so the raw token is logged directly. The {@code admin} environment
+     * ({@link #withAdmin()}) already ships a {@code first-admin} invitation, so you only need this for
+     * additional or non-admin audiences.
+     *
+     * @param id       the invitation id (also its key under {@code invitations})
+     * @param audience the audience the invitation binds the new user to
+     * @param claims   custom claim values pre-assigned to the user on registration (e.g.
+     *                 {@code Map.of("is_sympauthy_admin", "true")}); OpenID claims must come from the user
+     * @return this container, for chaining
+     */
+    public SympauthyContainer withBootstrapInvitation(String id, String audience, Map<String, String> claims) {
+        String prefix = "invitations." + id + ".";
+        withProperty(prefix + "audience", audience);
+        claims.forEach((name, value) -> withProperty(prefix + "claims." + name, value));
+        bootstrapInvitationIds.add(id);
+        return this;
+    }
+
+    /**
+     * Declares a bootstrap invitation with no pre-assigned claims. See
+     * {@link #withBootstrapInvitation(String, String, Map)}.
+     *
+     * @param id       the invitation id
+     * @param audience the audience the invitation binds the new user to
+     * @return this container, for chaining
+     */
+    public SympauthyContainer withBootstrapInvitation(String id, String audience) {
+        return withBootstrapInvitation(id, audience, Map.of());
+    }
+
+    /**
+     * Defines a public client, bound to the {@code admin} audience and wired to an
+     * {@link InteractiveFlowRegistry} mock frontend, suitable for redeeming an admin bootstrap
+     * invitation through the interactive flow. Pair it with {@link #withAdmin()} (which supplies the
+     * {@code admin} audience, the {@code is_sympauthy_admin} claim and the scope-granting rule) and
+     * {@link #withFlows(InteractiveFlowRegistry)}.
+     *
+     * <p>The generated {@code clients.<id>} (id {@link InteractiveFlowRegistry#clientId()}) uses the
+     * authorization-code flow with PKCE, allows the registry's {@link InteractiveFlowRegistry#redirectUri()
+     * redirect URI}, and both allows and defaults to {@code openid} plus the requested admin
+     * {@code scopes} (e.g. {@code "admin:users:read"}). The registry is also told to request those same
+     * scopes, so the authorize request and the client stay in sync.
+     *
+     * @param registry the mock flow frontend whose client this defines
+     * @param scopes   the admin scopes the client (and flow) request, on top of {@code openid}
+     * @return this container, for chaining
+     */
+    public SympauthyContainer withAdminClient(InteractiveFlowRegistry registry, String... scopes) {
+        Set<String> scopeSet = new LinkedHashSet<>();
+        scopeSet.add("openid");
+        scopeSet.addAll(Arrays.asList(scopes));
+        List<String> scopeList = new ArrayList<>(scopeSet);
+
+        Map<String, Object> client = new LinkedHashMap<>();
+        client.put("audience", ADMIN_AUDIENCE);
+        client.put("public", true);
+        client.put("authorizationFlow", registry.flowId());
+        client.put("allowed-grant-types", List.of("authorization_code"));
+        client.put("allowed-redirect-uris", List.of(registry.redirectUri()));
+        client.put("allowed-scopes", scopeList);
+        client.put("default-scopes", scopeList);
+
+        registry.withScopes(scopeList.toArray(new String[0]));
+        return withConfig(Map.of("clients", Map.of(registry.clientId(), client)));
+    }
+
+    /**
+     * Reads the raw token of a bootstrap invitation from this container's startup logs. Call after
+     * {@link #start()}. SympAuthy logs the token when it creates the invitation, which happens once the
+     * server is ready and only while no user has yet consented for the invitation's audience — so read
+     * the token on a fresh instance, before redeeming it.
+     *
+     * <p>Works both for invitations declared with {@link #withBootstrapInvitation(String, String, Map)}
+     * (which log the raw {@code Token: …}) and for the {@code admin} environment's built-in
+     * {@code first-admin} invitation (which logs a {@code Registration URL: …invitation_token=…}).
+     *
+     * @param id the bootstrap invitation id (e.g. {@code "first-admin"})
+     * @return the raw invitation token, to pass to
+     *         {@link com.sympauthy.testcontainers.flow.InteractiveFlow#withInvitationToken(String)}
+     * @throws IllegalStateException if no token for {@code id} appears within the timeout
+     */
+    public String getBootstrapInvitationToken(String id) {
+        long deadlineNanos = System.nanoTime() + BOOTSTRAP_TOKEN_TIMEOUT.toNanos();
+        while (true) {
+            String token = parseBootstrapToken(getLogs(), id);
+            if (token != null) {
+                return token;
+            }
+            if (System.nanoTime() >= deadlineNanos) {
+                throw new IllegalStateException("No token for bootstrap invitation '" + id
+                        + "' found in the container logs after " + BOOTSTRAP_TOKEN_TIMEOUT.toSeconds()
+                        + "s. It is logged only after the container is ready and only while no user has "
+                        + "yet consented for the invitation's audience — read it on a fresh instance. "
+                        + "Declared invitations: " + bootstrapInvitationIds
+                        + " (the 'admin' environment also ships 'first-admin').");
+            }
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(
+                        "Interrupted while waiting for the '" + id + "' bootstrap invitation token", e);
+            }
+        }
+    }
+
+    /**
+     * Extracts the token of the bootstrap invitation {@code id} from raw container logs, or returns
+     * {@code null} if absent. Handles both log forms SympAuthy emits: {@code … Token: <token>} (no
+     * url-template) and {@code … Registration URL: …invitation_token=<token>} (with a url-template).
+     */
+    static String parseBootstrapToken(String logs, String id) {
+        if (logs == null) {
+            return null;
+        }
+        Pattern pattern = Pattern.compile("Bootstrap invitation '" + Pattern.quote(id)
+                + "' created[^\\n]*?(?:Token: (\\S+)|invitation_token=([^&\\s]+))");
+        Matcher matcher = pattern.matcher(logs);
+        if (!matcher.find()) {
+            return null;
+        }
+        return matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
     }
 
     @Override

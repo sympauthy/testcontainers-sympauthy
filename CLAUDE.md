@@ -78,6 +78,42 @@ Key invariants to preserve when editing:
 - **Default image is `ghcr.io/sympauthy/sympauthy-nightly:latest`** (only a nightly is published). The
   constructor `assertCompatibleWith`s this, so a non-nightly image reference is rejected.
 
+### Admin API and bootstrap invitations
+
+Support for creating an admin user (to exercise SympAuthy's Admin API, `/api/v1/admin/*`) is built from
+the same escape hatches — no new channel:
+
+- **`withAdmin()`** *adds* the `admin` environment (keeping `default`), unlike `withEnvironments` which
+  *replaces*. The `admin` env (SympAuthy's bundled `application-admin.yml`) ships the Admin API/UI, an
+  `admin` audience (`sign-up-enabled: false`, `invitation-enabled: true`), the `is_sympauthy_admin`
+  boolean claim, a scope-granting `rules.user` (`CLAIM("is_sympauthy_admin") = "true"` → all admin
+  scopes), a public `admin` client (its redirect is SympAuthy's own `/admin/callback`, so it is **not**
+  reusable by the mock frontend), and a **`first-admin` bootstrap invitation** (audience `admin`, with a
+  url-template).
+- **`withBootstrapInvitation(id, audience[, claims])`** writes `invitations.<id>.{audience,claims.*}` as
+  program arguments (all flat keys — no lists — so `withProperties` fits). It deliberately sets **no**
+  `url-template`, so SympAuthy logs the raw `Token: <token>`. Invitations bind to an *audience*, not a
+  client. Never declare two invitations for one audience in a single run — `BootstrapInvitationManager`
+  revokes the prior one before creating the next.
+- **`withAdminClient(registry, scopes…)`** generates an `admin`-audience public client wired to the
+  interactive-flow mock frontend (redirect = `registry.redirectUri()`, `authorizationFlow` =
+  `registry.flowId()`, allowed/default scopes = `openid` + `scopes`) via `withConfig(Map)` (nested lists
+  → config-file channel), and calls `registry.withScopes(...)` so the authorize request and client stay
+  in sync. The `admin` env's built-in `admin` client can't be used with the mock frontend, so define a
+  dedicated one instead.
+- **`getBootstrapInvitationToken(id)`** (call *after* `start()`) polls `getLogs()` for the token. The
+  invitation is created on `ServiceReadyEvent` (≈HTTP readiness) and **only while no user has yet
+  consented** for its audience — so read it on a fresh instance, before redeeming. Parsing lives in the
+  Docker-free static **`parseBootstrapToken(logs, id)`**, which handles *both* log forms: `… Token:
+  <token>` (custom, no url-template) and `… Registration URL: …invitation_token=<token>` (the built-in
+  `first-admin`).
+- **Redemption goes through the interactive flow:** the token rides the authorize request as
+  `invitation_token` (see `InteractiveFlow.withInvitationToken` below), the sign-up creates the first
+  admin, the invitation pre-sets `is_sympauthy_admin`, the rule grants admin scopes, and the exchanged
+  access token is admin-scoped. `AdminApiWithBootstrapInvitationIT` proves the whole path end to end
+  (200 on `/api/v1/admin/users` with the token, 401/403 without); `AbstractSympauthyContainerIT.apiGet`
+  is the shared bearer-GET helper (works for any authenticated API, not just admin).
+
 ## Driving the interactive flow
 
 `com.sympauthy.testcontainers.flow` drives SympAuthy's
@@ -123,6 +159,11 @@ Key points when extending:
   `ClaimsHandler`, `ValidationCodeHandler`, `StepListener`), registered per `InteractiveFlow` with
   `with*`. A page reached without its handler throws; `StepListener` observes *every* page. Do not
   collapse the split.
+- **`InteractiveFlow.withInvitationToken(token)`** is a per-run field (only the redeeming sign-up needs
+  it): the registry adds it as the `invitation_token` query parameter in `authorizeParams(...)`, so the
+  authorize request redeems a (bootstrap) invitation. Pair it with a sign-up handler — e.g. the first
+  admin from `SympauthyContainer.getBootstrapInvitationToken("first-admin")` (see "Admin API and
+  bootstrap invitations" above).
 - **Traversed steps are accumulated on the flow.** The registry's `emit(...)` appends each `FlowStep`
   to the running flow (a package-private `CopyOnWriteArrayList`, reset at the start of each `run()`)
   *before* notifying the listener, and `InteractiveFlow.stepTypes()` exposes the `List<FlowStep.Type>`
