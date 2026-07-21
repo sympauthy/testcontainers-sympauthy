@@ -314,6 +314,9 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         if (active.invitationToken != null) {
             params.put("invitation_token", active.invitationToken);
         }
+        if (active.nonce != null) {
+            params.put("nonce", active.nonce);
+        }
         return params;
     }
 

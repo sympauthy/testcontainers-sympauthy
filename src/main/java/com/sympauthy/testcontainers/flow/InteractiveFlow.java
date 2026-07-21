@@ -33,6 +33,10 @@ public final class InteractiveFlow {
     // run, redeeming a (bootstrap) invitation as part of the sign-up.
     String invitationToken;
 
+    // When set, sent as the nonce query parameter on the authorize request that starts this run; the
+    // issued id_token must echo it back unchanged (OpenID Connect Core replay mitigation).
+    String nonce;
+
     // Steps traversed during run(), appended by the registry's emit() on the server threads and read
     // back on the run()/test thread — hence a thread-safe list.
     final List<FlowStep> steps = new CopyOnWriteArrayList<>();
@@ -78,6 +82,22 @@ public final class InteractiveFlow {
      */
     public InteractiveFlow withInvitationToken(String token) {
         this.invitationToken = token;
+        return this;
+    }
+
+    /**
+     * Sets the OpenID Connect {@code nonce} for this run: {@code nonce} is sent as the {@code nonce}
+     * query parameter on the authorize request, and the issued {@code id_token} must carry the same
+     * value back unchanged (OpenID Connect Core 1.0 §3.1.3.7 / §15.5.2 — a replay mitigation). Read it
+     * back from the {@code id_token} obtained via {@link AuthorizationResult#exchange()}
+     * ({@link TokenResponse#idToken()} / {@link TokenResponse#raw()}). When unset, no {@code nonce}
+     * parameter is sent.
+     *
+     * @param nonce the nonce value to echo through the flow
+     * @return this flow, for chaining
+     */
+    public InteractiveFlow withNonce(String nonce) {
+        this.nonce = nonce;
         return this;
     }
 

@@ -109,6 +109,29 @@ class InteractiveFlowTest {
     }
 
     @Test
+    void sendsTheNonceOnAuthorize() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withNonce("n-0S6_WzA2Mj")
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
+
+            registerSympAuthy(sympauthy, registry);
+            sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
+            attach(registry, sympauthy);
+
+            AuthorizationResult result = flow.run();
+
+            assertEquals(CODE, result.code());
+            // The nonce rides the authorize request as a query param, to be echoed in the id_token.
+            TestFlowServer.RecordedRequest authorize = sympauthy.firstRequest("GET", "/api/oauth2/authorize");
+            assertEquals("n-0S6_WzA2Mj",
+                    TestFlowServer.RecordedRequest.queryParam(authorize.query(), "nonce"));
+        }
+    }
+
+    @Test
     void abortsWhenSympAuthyRedirectsToTheErrorPage() {
         try (TestFlowServer sympauthy = new TestFlowServer();
                 InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {

@@ -164,6 +164,12 @@ Key points when extending:
   authorize request redeems a (bootstrap) invitation. Pair it with a sign-up handler — e.g. the first
   admin from `SympauthyContainer.getBootstrapInvitationToken("first-admin")` (see "Admin API and
   bootstrap invitations" above).
+- **`InteractiveFlow.withNonce(nonce)`** is the same per-run pattern: the registry adds it as the
+  `nonce` query parameter in `authorizeParams(...)` (only when set), so the OIDC `nonce` rides the
+  authorize request to be echoed back in the `id_token` (OpenID Connect Core §3.1.3.7 / §15.5.2 replay
+  mitigation). The module only *sends* it, verified Docker-free in `InteractiveFlowTest`; **echoing it
+  is a server capability**, so the end-to-end "`id_token` carries the nonce" check lives in SympAuthy's
+  own integration tests, not here.
 - **Traversed steps are accumulated on the flow.** The registry's `emit(...)` appends each `FlowStep`
   to the running flow (a package-private `CopyOnWriteArrayList`, reset at the start of each `run()`)
   *before* notifying the listener, and `InteractiveFlow.stepTypes()` exposes the `List<FlowStep.Type>`
