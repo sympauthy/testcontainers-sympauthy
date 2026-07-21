@@ -86,6 +86,29 @@ class InteractiveFlowTest {
     }
 
     @Test
+    void sendsTheInvitationTokenOnAuthorize() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("admin-app").withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withInvitationToken("boot-tok-123")
+                    .withSignUpHandler(configuration -> Map.of("email", "admin@example.com", "password", "s3cret"));
+
+            registerSympAuthy(sympauthy, registry);
+            sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
+            attach(registry, sympauthy);
+
+            AuthorizationResult result = flow.run();
+
+            assertEquals(CODE, result.code());
+            // The invitation token redeems the invitation by riding the authorize request as a query param.
+            TestFlowServer.RecordedRequest authorize = sympauthy.firstRequest("GET", "/api/oauth2/authorize");
+            assertEquals("boot-tok-123",
+                    TestFlowServer.RecordedRequest.queryParam(authorize.query(), "invitation_token"));
+        }
+    }
+
+    @Test
     void abortsWhenSympAuthyRedirectsToTheErrorPage() {
         try (TestFlowServer sympauthy = new TestFlowServer();
                 InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
