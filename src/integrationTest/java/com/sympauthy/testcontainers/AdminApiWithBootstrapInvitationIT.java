@@ -38,7 +38,7 @@ class AdminApiWithBootstrapInvitationIT extends AbstractSympauthyContainerIT {
 
     @Test
     void redeemsTheBootstrapInvitationAndCallsTheAdminApi() throws Exception {
-        try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("admin-app")
+        try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("admin-app"))
                         .withFlowId("admin-flow");
                 SympauthyContainer sympauthy = new SympauthyContainer()
                         .withAdmin()

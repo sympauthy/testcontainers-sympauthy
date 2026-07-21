@@ -356,7 +356,7 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
      * the authentication method (e.g. password) and claims.
      *
      * <p>Because the flow's page URLs must be baked into SympAuthy's startup configuration, create the
-     * registry (with {@link InteractiveFlowRegistry#forClient(String)}) <em>before</em> calling this.
+     * registry (with {@link InteractiveFlowRegistry#forClient(Client)}) <em>before</em> calling this.
      *
      * @param registry the mock flow frontend
      * @return this container, for chaining

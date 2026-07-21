@@ -188,7 +188,7 @@ Create the registry first (it binds a local port immediately), hand it to the co
 `withFlows`, then mint a flow, start, and `run()`:
 
 ```java
-try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app")
+try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app"))
         .withScopes("openid");
      SympauthyContainer sympauthy = new SympauthyContainer()
         .withConfig(Map.of(
@@ -253,9 +253,10 @@ TokenResponse tokens = signIn.run().exchange();   // signs in as that user
 
 ### Confidential clients
 
-`forClient(id)` drives a **public** client (PKCE only). To authenticate as a **confidential** client —
-so an issued token can later be presented to endpoints that require client authentication (e.g. token
-revocation or introspection) — pass a `Client`. The token exchange then sends the secret, as
+`forClient(...)` takes a `Client`: `Client.publicClient(id)` (above) drives a **public** client (PKCE
+only). To authenticate as a **confidential** client — so an issued token can later be presented to
+endpoints that require client authentication (e.g. token revocation or introspection) — pass
+`Client.confidentialClient(...)` instead. The token exchange then sends the secret, as
 `client_secret_post` by default or `client_secret_basic`:
 
 ```java
@@ -298,7 +299,7 @@ scopes). Read the invitation token from the logs, redeem it through a sign-up fl
 `withInvitationToken(...)`, and use the resulting access token against the Admin API:
 
 ```java
-try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("admin-app")
+try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("admin-app"))
         .withFlowId("admin-flow");
      SympauthyContainer sympauthy = new SympauthyContainer()
         .withAdmin()                                    // Admin API + audience + claim + rule + first-admin invitation

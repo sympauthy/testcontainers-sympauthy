@@ -3,6 +3,7 @@ package com.sympauthy.testcontainers.flow;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.sympauthy.testcontainers.AbstractSympauthyContainerIT;
+import com.sympauthy.testcontainers.Client;
 import com.sympauthy.testcontainers.SympauthyContainer;
 import com.sympauthy.testcontainers.client.TokenResponse;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,7 @@ class SignUpWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
 
     @Test
     void signsUpAndExchangesCodeForTokens() throws Exception {
-        try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(CLIENT_ID)
+        try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient(CLIENT_ID))
                         .withScopes("openid");
                 SympauthyContainer sympauthy = new SympauthyContainer()
                         .withConfig(config(registry))

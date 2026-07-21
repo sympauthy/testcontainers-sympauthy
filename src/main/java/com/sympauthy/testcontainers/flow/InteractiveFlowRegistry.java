@@ -46,7 +46,7 @@ import java.util.Map;
  * start the container and {@link InteractiveFlow#run()} each flow:
  *
  * <pre>{@code
- * try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app")
+ * try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app"))
  *         .withScopes("openid");
  *      SympauthyContainer container = new SympauthyContainer()
  *         .withConfig(passwordAuthAndClaims)
@@ -106,16 +106,11 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         server.start();
     }
 
-    /** Creates a mock frontend that authenticates as the given <em>public</em> client id (PKCE only). */
-    public static InteractiveFlowRegistry forClient(String clientId) {
-        return new InteractiveFlowRegistry(Client.publicClient(clientId));
-    }
-
     /**
-     * Creates a mock frontend that authenticates as the given {@link Client} — public
-     * ({@link Client#publicClient}) or confidential ({@link Client#confidentialClient}, whose secret the
-     * token exchange sends via {@code client_secret_post} or {@code client_secret_basic}). Declare a
-     * matching {@code clients.<id>} (and, for a confidential client, {@code clients.<id>.secret}, which
+     * Creates a mock frontend that authenticates as the given {@link Client} — {@link Client#publicClient
+     * public} (PKCE only) or {@link Client#confidentialClient confidential} (whose secret the token
+     * exchange sends via {@code client_secret_post} or {@code client_secret_basic}). Declare a matching
+     * {@code clients.<id>} (and, for a confidential client, {@code clients.<id>.secret}, which
      * {@link #clientSecret()} exposes so the sent and configured secrets stay in sync).
      */
     public static InteractiveFlowRegistry forClient(Client client) {

@@ -209,11 +209,11 @@ Key points when extending:
   `/validate-claims` page throws `UnsupportedFlowStepException` (the seam for a future validation
   tier); MFA is not modelled.
 - **PKCE `S256` is always sent.** The registry is constructed from a **`Client`** (root package: id +
-  optional secret + public/confidential, with `authenticate(form, request)`): `forClient(String)` is
-  sugar for a **public** client (`Client.publicClient`, PKCE only), and `forClient(Client)` takes any
-  client — pass `Client.confidentialClient(id, secret[, Client.ClientAuthMethod.BASIC])` for a
-  **confidential** one, whose secret the exchange sends as `client_secret_post` (default) or
-  `client_secret_basic` while still sending PKCE. Declare a matching `clients.<id>.secret` (the config
+  optional secret + public/confidential, with `authenticate(form, request)`) via `forClient(Client)`:
+  pass `Client.publicClient(id)` for a **public** client (PKCE only), or
+  `Client.confidentialClient(id, secret[, Client.ClientAuthMethod.BASIC])` for a **confidential** one,
+  whose secret the exchange sends as `client_secret_post` (default) or `client_secret_basic` while still
+  sending PKCE. Declare a matching `clients.<id>.secret` (the config
   key is **`secret`**, and `public` defaults to `false`); `registry.clientSecret()` exposes the value so
   the sent and configured secrets stay in sync. The registry holds the `Client` and builds a
   **`client.TokenClient`** internally for the exchange; its `clientCredentials(scopes…)` grant is

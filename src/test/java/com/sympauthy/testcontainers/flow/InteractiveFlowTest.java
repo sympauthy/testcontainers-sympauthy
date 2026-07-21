@@ -29,7 +29,7 @@ class InteractiveFlowTest {
     @Test
     void drivesSignUpToACodeAndTokens() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow()
                     .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
 
@@ -111,7 +111,7 @@ class InteractiveFlowTest {
         // in sync with the flow's own stepTypes() history.
         List<FlowStep> observed = new ArrayList<>();
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow()
                     .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"))
                     .withClaimsHandler(claims -> Map.of("given_name", "Ada"))
@@ -141,7 +141,7 @@ class InteractiveFlowTest {
     @Test
     void sendsTheInvitationTokenOnAuthorize() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("admin-app").withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("admin-app")).withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow()
                     .withInvitationToken("boot-tok-123")
                     .withSignUpHandler(configuration -> Map.of("email", "admin@example.com", "password", "s3cret"));
@@ -164,7 +164,7 @@ class InteractiveFlowTest {
     @Test
     void sendsTheNonceOnAuthorize() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow()
                     .withNonce("n-0S6_WzA2Mj")
                     .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
@@ -187,7 +187,7 @@ class InteractiveFlowTest {
     @Test
     void abortsWhenSympAuthyRedirectsToTheErrorPage() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow()
                     .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
 
@@ -203,7 +203,7 @@ class InteractiveFlowTest {
     @Test
     void failsWhenSympAuthyRedirectsToAnUnsupportedPage() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow();
 
             registerSympAuthy(sympauthy, registry);
@@ -220,7 +220,7 @@ class InteractiveFlowTest {
     @Test
     void failsWhenNoAuthenticationHandlerIsConfigured() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow();
 
             registerSympAuthy(sympauthy, registry);
@@ -232,7 +232,7 @@ class InteractiveFlowTest {
 
     @Test
     void failsWhenNotAttachedToAContainer() {
-        try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app").withScopes("openid")) {
+        try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow().withSignUpHandler(configuration -> Map.of());
             assertThrows(IllegalStateException.class, flow::run);
         }
