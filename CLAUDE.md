@@ -208,19 +208,19 @@ Key points when extending:
 - **v1 covers the password happy path** (sign-in/sign-up → collect claims → code). The
   `/validate-claims` page throws `UnsupportedFlowStepException` (the seam for a future validation
   tier); MFA is not modelled.
-- **PKCE `S256` is always sent.** By default the registry drives a **public** client (no secret), so
-  token exchange uses the verifier only (`InteractiveFlowRegistry.forClient`). For a **confidential**
-  client, use `forConfidentialClient(clientId, secret)`: the exchange also authenticates the client,
-  sending the secret as `client_secret_post` (default) or `client_secret_basic` (opt in with
-  `withClientAuthMethod(Client.ClientAuthMethod.BASIC)`), while still sending PKCE. Declare a matching
-  `clients.<id>.secret` (the config key is **`secret`**, and `public` defaults to `false`);
-  `registry.clientSecret()` exposes the value so the sent and configured secrets stay in sync. The
-  client identity is a **`Client`** (root package: id + optional secret + public/confidential, with
-  `authenticate(form, request)`); the exchange runs through **`client.TokenClient`**, whose
-  `clientCredentials(scopes…)` grant is reusable to obtain a token for SympAuthy's Client API with no
-  interactive flow (`registry.client()` hands you the `Client` to build one). The module only *sends*
-  the secret (verified Docker-free in `TokenClientTest`/`InteractiveFlowTest`); the end-to-end
-  confidential exchange / revoke / introspect proof lives in SympAuthy's own integration tests.
+- **PKCE `S256` is always sent.** The registry is constructed from a **`Client`** (root package: id +
+  optional secret + public/confidential, with `authenticate(form, request)`): `forClient(String)` is
+  sugar for a **public** client (`Client.publicClient`, PKCE only), and `forClient(Client)` takes any
+  client — pass `Client.confidentialClient(id, secret[, Client.ClientAuthMethod.BASIC])` for a
+  **confidential** one, whose secret the exchange sends as `client_secret_post` (default) or
+  `client_secret_basic` while still sending PKCE. Declare a matching `clients.<id>.secret` (the config
+  key is **`secret`**, and `public` defaults to `false`); `registry.clientSecret()` exposes the value so
+  the sent and configured secrets stay in sync. The registry holds the `Client` and builds a
+  **`client.TokenClient`** internally for the exchange; its `clientCredentials(scopes…)` grant is
+  reusable to obtain a token for SympAuthy's Client API with no interactive flow (`registry.client()`
+  hands you the `Client` to build one). The module only *sends* the secret (verified Docker-free in
+  `TokenClientTest`/`InteractiveFlowTest`); the end-to-end confidential exchange / revoke / introspect
+  proof lives in SympAuthy's own integration tests.
 - **`JsonCodec` is the only class that touches the JSON parser.** It wraps `minimal-json` and lives in
   `com.sympauthy.testcontainers.internal.json` (public, shared by `flow` and `client`) — the same
   package the Shadow plugin relocates `minimal-json` into. Internal, non-published utilities live under

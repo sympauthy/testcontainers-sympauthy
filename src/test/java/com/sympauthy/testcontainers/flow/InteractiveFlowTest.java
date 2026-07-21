@@ -62,8 +62,8 @@ class InteractiveFlowTest {
     @Test
     void sendsTheClientSecretAtExchangeForAConfidentialClient() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlowRegistry registry =
-                        InteractiveFlowRegistry.forConfidentialClient("test-app", "s3cr3t").withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry
+                        .forClient(Client.confidentialClient("test-app", "s3cr3t")).withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow()
                     .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
 
@@ -83,10 +83,9 @@ class InteractiveFlowTest {
     @Test
     void sendsTheClientSecretViaBasicAuthWhenConfigured() {
         try (TestFlowServer sympauthy = new TestFlowServer();
-                InteractiveFlowRegistry registry =
-                        InteractiveFlowRegistry.forConfidentialClient("test-app", "s3cr3t")
-                                .withClientAuthMethod(Client.ClientAuthMethod.BASIC)
-                                .withScopes("openid")) {
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry
+                        .forClient(Client.confidentialClient("test-app", "s3cr3t", Client.ClientAuthMethod.BASIC))
+                        .withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow()
                     .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
 
