@@ -81,6 +81,10 @@ tasks.named<ShadowJar>("shadowJar") {
     archiveClassifier = ""
     configurations = listOf(shade)
     relocate("com.eclipsesource.json", "com.sympauthy.testcontainers.internal.json")
+    // Drop the shaded dependency's own Maven metadata. Left in place, GitHub Packages reads
+    // minimal-json's embedded pom.xml and shows its "A Minimal JSON Parser and Writer" text as
+    // this module's package description. Our published POM (below) is the single source of truth.
+    exclude("META-INF/maven/**")
 }
 
 // Move the thin jar aside so it doesn't collide with the shadow jar (which takes the empty
@@ -120,6 +124,11 @@ publishing {
             // The shaded JSON parser is deliberately absent from the POM: Testcontainers is the only
             // dependency a consumer inherits.
             pom {
+                name = "Testcontainers SympAuthy"
+                description = "Testcontainers module for SympAuthy, a self-hosted OAuth 2.1 / " +
+                    "OpenID Connect authorization server."
+                url = "https://github.com/sympauthy/testcontainers-sympauthy"
+
                 withXml {
                     val dependencies = asNode().appendNode("dependencies")
                     dependencies.appendNode("dependency").apply {
