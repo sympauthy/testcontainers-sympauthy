@@ -1,4 +1,4 @@
-package com.sympauthy.testcontainers.flow;
+package com.sympauthy.testcontainers.internal.json;
 
 import com.eclipsesource.json.Json;
 import com.eclipsesource.json.JsonArray;
@@ -11,23 +11,26 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Minimal JSON bridge: parses Flow API responses into {@link Map}/{@link List} trees and serializes
- * request bodies. This is the only class that touches the JSON parser (the shaded, relocated
+ * Minimal JSON bridge: parses SympAuthy API responses into {@link Map}/{@link List} trees and
+ * serializes request bodies. This is the only class that touches the JSON parser (the shaded, relocated
  * {@code minimal-json}), so swapping the library stays a one-file change.
+ *
+ * <p>Lives under {@code com.sympauthy.testcontainers.internal.*} — the namespace for internal,
+ * non-published utilities — next to the Shadow-relocated {@code minimal-json} classes.
  */
-final class JsonCodec {
+public final class JsonCodec {
 
     private JsonCodec() {
     }
 
     /** Parses a JSON document into a nested {@link Map}/{@link List}/scalar tree. */
-    static Object parse(String text) {
+    public static Object parse(String text) {
         return toJava(Json.parse(text));
     }
 
     /** Parses a JSON object document into a map, failing if the top level is not an object. */
     @SuppressWarnings("unchecked")
-    static Map<String, Object> parseObject(String text) {
+    public static Map<String, Object> parseObject(String text) {
         Object parsed = parse(text);
         if (!(parsed instanceof Map)) {
             throw new IllegalArgumentException("Expected a JSON object but got: " + text);
@@ -36,7 +39,7 @@ final class JsonCodec {
     }
 
     /** Serializes a nested {@link Map}/{@link List}/scalar tree to a compact JSON document. */
-    static String write(Object value) {
+    public static String write(Object value) {
         return toJson(value).toString();
     }
 

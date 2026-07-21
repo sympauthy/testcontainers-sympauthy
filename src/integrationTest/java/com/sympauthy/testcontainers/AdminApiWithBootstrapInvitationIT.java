@@ -1,9 +1,9 @@
 package com.sympauthy.testcontainers;
 
+import com.sympauthy.testcontainers.client.TokenResponse;
 import com.sympauthy.testcontainers.flow.AuthorizationResult;
 import com.sympauthy.testcontainers.flow.InteractiveFlow;
 import com.sympauthy.testcontainers.flow.InteractiveFlowRegistry;
-import com.sympauthy.testcontainers.flow.TokenResponse;
 import org.junit.jupiter.api.Test;
 
 import java.net.http.HttpResponse;

@@ -7,9 +7,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A single-module Testcontainers module that runs [SympAuthy](https://sympauthy.github.io/) — a
 self-hosted OAuth 2.1 / OpenID Connect authorization server — from Java tests. Consumers add it as a
 library dependency and drive `SympauthyContainer` from their own test suites. The core is one public
-class, `src/main/java/com/sympauthy/testcontainers/SympauthyContainer.java`; a second package,
-`src/main/java/com/sympauthy/testcontainers/flow/`, adds a programmatic driver for SympAuthy's
+class, `src/main/java/com/sympauthy/testcontainers/SympauthyContainer.java`; a `client` package holds
+the SympAuthy-server API clients, and a `flow` package adds a programmatic driver for SympAuthy's
 interactive login/authorization flow (see "Driving the interactive flow").
+
+### Source layout (`src/main/java`)
+
+The **root package** lists its classes; each sub-package is described at the package level:
+
+```
+com.sympauthy.testcontainers          (root)
+├─ SympauthyContainer ......... the Testcontainers container that boots & configures SympAuthy
+└─ Client ..................... OAuth client credentials (id + optional secret + public/confidential);
+                                authenticates a token request (client_secret_basic / client_secret_post)
+
+com.sympauthy.testcontainers.client         HTTP clients for the APIs exposed by the SympAuthy server —
+                                            the OAuth2 token endpoint (TokenClient/TokenResponse) and the
+                                            Flow API (FlowApiClient/FlowResponse), plus
+                                            SympauthyApiException; usable standalone, no flow needed
+
+com.sympauthy.testcontainers.flow           drives SympAuthy's interactive login/authorization flow: the
+                                            mock frontend + container wiring, scripted runs, PKCE, and
+                                            per-page handlers (builds on the client package's FlowApiClient)
+
+com.sympauthy.testcontainers.internal.json  internal utilities — the JsonCodec wrapper over the
+                                            Shadow-relocated minimal-json parser
+```
+
+Convention: **internal, non-published utility classes live under `com.sympauthy.testcontainers.internal.*`**
+(the namespace the Shadow plugin relocates `minimal-json` into). The dependency direction is one-way:
+`flow → client → internal.json`, and `client` depends on nothing in `flow` so the API clients stay usable
+standalone.
 
 ## Commands
 
@@ -72,9 +100,9 @@ Key invariants to preserve when editing:
   overrides > `MICRONAUT_ENVIRONMENTS` profiles > mounted config files > image's bundled defaults.
 - **No JSON dependency in the published API.** `withConfig(Map)` serializes via the in-house
   `toJson`/`appendJson` (Maps → objects, Lists → arrays, Number/Boolean → literals, everything else
-  quoted). Don't add a JSON library *for the container* — extend the serializer. The `flow` package
-  does parse JSON, but its parser (`minimal-json`) is shaded and relocated (see "Driving the
-  interactive flow"), so the published jar/POM still expose no JSON dependency.
+  quoted). Don't add a JSON library *for the container* — extend the serializer. The `client`/`flow`
+  packages do parse JSON (via `internal.json.JsonCodec`), but its parser (`minimal-json`) is shaded and
+  relocated (see "Driving the interactive flow"), so the published jar/POM still expose no JSON dependency.
 - **Default image is `ghcr.io/sympauthy/sympauthy-nightly:latest`** (only a nightly is published). The
   constructor `assertCompatibleWith`s this, so a non-nightly image reference is rejected.
 
@@ -152,9 +180,11 @@ Key points when extending:
   the HTTP server/port, `clientId`/`flowId`/`scopes`, `attach`/`flowProperties`, and the dispatch
   routing; `InteractiveFlow` (same package, so the registry reads its package-private handler fields)
   carries only the per-run callbacks and a `run()` that delegates to `registry.run(this)`.
-- **`FlowApiClient`** — the thin client each mock page uses (one method per Flow API endpoint,
-  returning a parsed `FlowResponse`). It encapsulates the state transport: **GET carries the state as
-  `?state=<jwt>`, POST carries it in an `Authorization: State <jwt>` header.** Public, for custom flows.
+- **`FlowApiClient`** (in the **`client` package**) — the thin client each mock page uses (one method
+  per Flow API endpoint, returning a parsed `client.FlowResponse`). It encapsulates the state transport:
+  **GET carries the state as `?state=<jwt>`, POST carries it in an `Authorization: State <jwt>` header.**
+  Public, for custom flows. It lives in `client` alongside `TokenClient` because both are HTTP clients
+  for SympAuthy-server APIs; both throw `client.SympauthyApiException` on failure.
 - **Callbacks are segregated single-method interfaces** (`SignInHandler`, `SignUpHandler`,
   `ClaimsHandler`, `ValidationCodeHandler`, `StepListener`), registered per `InteractiveFlow` with
   `with*`. A page reached without its handler throws; `StepListener` observes *every* page. Do not
@@ -178,15 +208,30 @@ Key points when extending:
 - **v1 covers the password happy path** (sign-in/sign-up → collect claims → code). The
   `/validate-claims` page throws `UnsupportedFlowStepException` (the seam for a future validation
   tier); MFA is not modelled.
-- **PKCE `S256` is always sent**; the registry drives a **public** client (no `client_secret`), so
-  token exchange uses the verifier only.
-- **`JsonCodec` is the only class that touches the JSON parser.** It wraps `minimal-json`, which the
-  Shadow plugin relocates into `com.sympauthy.testcontainers.internal.json` — swapping parsers is a
-  one-file change.
-- **Unit tests are Docker-free** (`src/test/java/.../flow/`): the mock frontend runs against a stub
-  SympAuthy (the in-JVM `TestFlowServer`) whose `/authorize` redirects to the frontend's page URLs and
-  whose Flow API returns scripted `redirect_url`s (`InteractiveFlowTest`). `SignUpWithInteractiveFlowIT`
-  and `SignInWithInteractiveFlowIT` boot a real container and wire the frontend with `withFlows`.
+- **PKCE `S256` is always sent.** By default the registry drives a **public** client (no secret), so
+  token exchange uses the verifier only (`InteractiveFlowRegistry.forClient`). For a **confidential**
+  client, use `forConfidentialClient(clientId, secret)`: the exchange also authenticates the client,
+  sending the secret as `client_secret_post` (default) or `client_secret_basic` (opt in with
+  `withClientAuthMethod(Client.ClientAuthMethod.BASIC)`), while still sending PKCE. Declare a matching
+  `clients.<id>.secret` (the config key is **`secret`**, and `public` defaults to `false`);
+  `registry.clientSecret()` exposes the value so the sent and configured secrets stay in sync. The
+  client identity is a **`Client`** (root package: id + optional secret + public/confidential, with
+  `authenticate(form, request)`); the exchange runs through **`client.TokenClient`**, whose
+  `clientCredentials(scopes…)` grant is reusable to obtain a token for SympAuthy's Client API with no
+  interactive flow (`registry.client()` hands you the `Client` to build one). The module only *sends*
+  the secret (verified Docker-free in `TokenClientTest`/`InteractiveFlowTest`); the end-to-end
+  confidential exchange / revoke / introspect proof lives in SympAuthy's own integration tests.
+- **`JsonCodec` is the only class that touches the JSON parser.** It wraps `minimal-json` and lives in
+  `com.sympauthy.testcontainers.internal.json` (public, shared by `flow` and `client`) — the same
+  package the Shadow plugin relocates `minimal-json` into. Internal, non-published utilities live under
+  `com.sympauthy.testcontainers.internal.*`; swapping parsers stays a one-file change.
+- **Unit tests are Docker-free**: the interactive-flow tests (`src/test/java/.../flow/`) run the mock
+  frontend against a stub SympAuthy (the in-JVM `TestFlowServer`) whose `/authorize` redirects to the
+  frontend's page URLs and whose Flow API returns scripted `redirect_url`s (`InteractiveFlowTest`, which
+  also covers the confidential-client exchange). `TokenClientTest` (`.../client/`, with its own small
+  recording server) and `ClientTest` (root package) cover the token client and credential authentication
+  directly. `SignUpWithInteractiveFlowIT` and `SignInWithInteractiveFlowIT` boot a real container and
+  wire the frontend with `withFlows`.
 - **How the redirects flow (verified):** with the flow's page URLs pointing at the mock frontend,
   `/authorize` 303-redirects the browser to `<frontend>/sign-in?state=<jwt>`; each page's Flow API call
   returns the next `redirect_url` (another frontend page, or the client `/callback?code=`). The browser
@@ -207,10 +252,11 @@ dependency against the **lowest** supported release widens compatibility: Gradle
 highest requested version, so consumers already on 2.0.0+ aren't forced to upgrade. The module is
 Testcontainers **2.x only** (2.0 relocated packages and dropped JUnit 4).
 
-The flow package's JSON parser (`minimal-json`) is **bundled and relocated**, not exposed: it lives
-in a dedicated `shade` configuration (extended into `compileOnly`/`testImplementation` so main and
-tests compile against the un-relocated classes) and the `com.gradleup.shadow` plugin's `shadowJar`
-relocates it into `com.sympauthy.testcontainers.internal.json`. The published artifact is that shadow
+The JSON parser (`minimal-json`, wrapped by `internal.json.JsonCodec`) is **bundled and relocated**, not
+exposed: it lives in a dedicated `shade` configuration (extended into `compileOnly`/`testImplementation`
+so main and tests compile against the un-relocated classes) and the `com.gradleup.shadow` plugin's
+`shadowJar` relocates it into `com.sympauthy.testcontainers.internal.json` (our `JsonCodec` wrapper
+already lives in that package and is left untouched by the relocation). The published artifact is that shadow
 jar, and the POM is hand-built (`pom.withXml`) to list **only** `testcontainers` — so a consumer
 inherits no JSON dependency and cannot hit a version clash. Prefer this shade-and-relocate approach
 over exposing a third-party dependency when adding one. Verify after changes: `jar tf` on the built

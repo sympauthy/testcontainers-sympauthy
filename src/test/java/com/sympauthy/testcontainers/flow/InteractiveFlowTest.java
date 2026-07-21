@@ -1,12 +1,17 @@
 package com.sympauthy.testcontainers.flow;
 
+import com.sympauthy.testcontainers.Client;
+import com.sympauthy.testcontainers.client.TokenResponse;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -49,6 +54,55 @@ class InteractiveFlowTest {
             assertTrue(tokenBody.contains("grant_type=authorization_code"));
             assertTrue(tokenBody.contains("code=" + CODE));
             assertTrue(tokenBody.contains("code_verifier="));
+            // A public client sends no secret — PKCE only.
+            assertFalse(tokenBody.contains("client_secret="), tokenBody);
+        }
+    }
+
+    @Test
+    void sendsTheClientSecretAtExchangeForAConfidentialClient() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry =
+                        InteractiveFlowRegistry.forConfidentialClient("test-app", "s3cr3t").withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
+
+            registerSympAuthy(sympauthy, registry);
+            sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
+            attach(registry, sympauthy);
+
+            flow.run().exchange();
+
+            // A confidential client sends its secret as a client_secret_post form parameter by default.
+            String tokenBody = sympauthy.firstRequest("POST", "/api/oauth2/token").body();
+            assertTrue(tokenBody.contains("client_secret=s3cr3t"), tokenBody);
+        }
+    }
+
+    @Test
+    void sendsTheClientSecretViaBasicAuthWhenConfigured() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry =
+                        InteractiveFlowRegistry.forConfidentialClient("test-app", "s3cr3t")
+                                .withClientAuthMethod(Client.ClientAuthMethod.BASIC)
+                                .withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
+
+            registerSympAuthy(sympauthy, registry);
+            sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
+            attach(registry, sympauthy);
+
+            flow.run().exchange();
+
+            // Basic auth: the secret rides the Authorization header, not the form body.
+            TestFlowServer.RecordedRequest token = sympauthy.firstRequest("POST", "/api/oauth2/token");
+            String expected = "Basic " + Base64.getEncoder()
+                    .encodeToString("test-app:s3cr3t".getBytes(StandardCharsets.UTF_8));
+            assertEquals(expected, token.headers().get("Authorization"));
+            assertFalse(token.body().contains("client_secret="), token.body());
         }
     }
 

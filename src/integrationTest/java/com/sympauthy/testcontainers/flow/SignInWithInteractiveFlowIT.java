@@ -3,6 +3,7 @@ package com.sympauthy.testcontainers.flow;
 import com.nimbusds.jwt.SignedJWT;
 import com.sympauthy.testcontainers.AbstractSympauthyContainerIT;
 import com.sympauthy.testcontainers.SympauthyContainer;
+import com.sympauthy.testcontainers.client.TokenResponse;
 import org.junit.jupiter.api.Test;
 
 import java.text.ParseException;
