@@ -188,19 +188,16 @@ Create the registry first (it binds a local port immediately), hand it to the co
 `withFlows`, then mint a flow, start, and `run()`:
 
 ```java
-try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app"))
-        .withScopes("openid");
+Client client = ...;                       // a public or confidential client — see below
+InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(client).withScopes("openid");
+Map<String, Object> clientConfig = ...;    // the matching clients.<id> config — see below
+
+try (registry;
      SympauthyContainer sympauthy = new SympauthyContainer()
         .withConfig(Map.of(
             "auth",    Map.of("by-password", Map.of("enabled", true), "identifier-claims", List.of("email")),
             "claims",  Map.of("email", Map.of("enabled", true)),
-            // You own the client — point it at the frontend's callback and flow id:
-            "clients", Map.of("test-app", Map.of(
-                "public", true,
-                "authorizationFlow", registry.flowId(),
-                "allowed-grant-types", List.of("authorization_code"),
-                "allowed-scopes", List.of("openid"),
-                "allowed-redirect-uris", List.of(registry.redirectUri())))))
+            "clients", Map.of(client.id(), clientConfig)))   // you own the client (see below)
         .withFlows(registry)) {   // contributes only the flows.<id> definition
 
     InteractiveFlow signUp = registry.newFlow()
@@ -251,16 +248,33 @@ TokenResponse tokens = signIn.run().exchange();   // signs in as that user
 > The frontend covers the password happy path (sign-in/sign-up → collect claims → code). Multi-factor
 > auth and enforced email/SMS validation raise `UnsupportedFlowStepException`.
 
-### Confidential clients
+### Public client
 
-Pass a confidential `Client` to authenticate at the token endpoint with a secret (`client_secret_post`,
-or `client_secret_basic`). Declare the matching client with `"public", false` and `"secret",
-registry.clientSecret()`.
+A public client (PKCE only, no secret):
 
 ```java
-InteractiveFlowRegistry registry = InteractiveFlowRegistry
-    .forClient(Client.confidentialClient("test-app", "s3cr3t"))  // + Client.ClientAuthMethod.BASIC for HTTP Basic
-    .withScopes("openid");
+Client client = Client.publicClient("test-app");
+Map<String, Object> clientConfig = Map.of(
+    "public", true,
+    "authorizationFlow", registry.flowId(),
+    "allowed-grant-types", List.of("authorization_code"),
+    "allowed-scopes", List.of("openid"),
+    "allowed-redirect-uris", List.of(registry.redirectUri()));
+```
+
+### Confidential client
+
+Authenticates at the token endpoint with a secret (`client_secret_post`, or `client_secret_basic`):
+
+```java
+Client client = Client.confidentialClient("test-app", "s3cr3t");  // + Client.ClientAuthMethod.BASIC for HTTP Basic
+Map<String, Object> clientConfig = Map.of(
+    "public", false,
+    "secret", client.secret(),
+    "authorizationFlow", registry.flowId(),
+    "allowed-grant-types", List.of("authorization_code"),
+    "allowed-scopes", List.of("openid"),
+    "allowed-redirect-uris", List.of(registry.redirectUri()));
 ```
 
 ## Creating an admin user (Admin API)
