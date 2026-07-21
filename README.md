@@ -1,6 +1,96 @@
 # testcontainers-sympauthy
 Testcontainers module for SympAuthy, an OAuth 2.0 / OpenID Connect authorization server
 
+## Installation
+
+The library is published to **GitHub Packages** at
+`https://maven.pkg.github.com/sympauthy/testcontainers-sympauthy`. Even though the package is public,
+GitHub's Maven registry requires authentication for every read, so you need a
+[personal access token](https://github.com/settings/tokens) with the `read:packages` scope (classic
+token) — supply it as the password below. It's a test-only dependency.
+
+### Gradle (Kotlin DSL)
+
+```kotlin
+repositories {
+    mavenCentral()
+    maven {
+        url = uri("https://maven.pkg.github.com/sympauthy/testcontainers-sympauthy")
+        credentials {
+            // Set gpr.user / gpr.token in ~/.gradle/gradle.properties, or fall back to env vars.
+            username = providers.gradleProperty("gpr.user").orNull ?: System.getenv("GITHUB_ACTOR")
+            password = providers.gradleProperty("gpr.token").orNull ?: System.getenv("GITHUB_TOKEN")
+        }
+    }
+}
+
+dependencies {
+    testImplementation("com.sympauthy:testcontainers-sympauthy:0.1.0")
+}
+```
+
+### Maven
+
+Add a server with your token to `~/.m2/settings.xml`:
+
+```xml
+<servers>
+  <server>
+    <id>github-sympauthy</id>
+    <username>YOUR_GITHUB_USERNAME</username>
+    <password>YOUR_GITHUB_TOKEN</password> <!-- PAT with read:packages -->
+  </server>
+</servers>
+```
+
+Then reference the repository and dependency in your `pom.xml`:
+
+```xml
+<repositories>
+  <repository>
+    <id>github-sympauthy</id>
+    <url>https://maven.pkg.github.com/sympauthy/testcontainers-sympauthy</url>
+  </repository>
+</repositories>
+
+<dependencies>
+  <dependency>
+    <groupId>com.sympauthy</groupId>
+    <artifactId>testcontainers-sympauthy</artifactId>
+    <version>0.1.0</version>
+    <scope>test</scope>
+  </dependency>
+</dependencies>
+```
+
+The only dependency you inherit is Testcontainers itself (the JSON parser used internally is shaded).
+
+### In CI (GitHub Actions)
+
+No personal access token needed — the workflow's automatic `GITHUB_TOKEN` can read the (public)
+package. Grant it `packages: read` and pass it through as the registry password:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read          # lets GITHUB_TOKEN read GitHub Packages
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - run: ./gradlew test
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # consumed by the credentials block above
+```
+
+This reuses the `System.getenv("GITHUB_ACTOR")` / `System.getenv("GITHUB_TOKEN")` fallback in the
+Gradle snippet, so the same build works locally (via `gpr.*` properties) and in CI (via these env
+vars). For Maven, store the token as a secret and reference it from the `<server>` in `settings.xml`.
+
 ## Usage
 
 ```java
