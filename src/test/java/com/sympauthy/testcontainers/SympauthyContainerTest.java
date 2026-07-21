@@ -227,7 +227,7 @@ class SympauthyContainerTest {
     @Test
     void adminClientIsMountedAsAConfigFile() {
         try (InteractiveFlowRegistry registry =
-                InteractiveFlowRegistry.forClient("admin-app").withFlowId("admin-flow")) {
+                InteractiveFlowRegistry.forClient(Client.publicClient("admin-app")).withFlowId("admin-flow")) {
             SympauthyContainer container = new SympauthyContainer()
                     .withAdmin()
                     .withAdminClient(registry, "admin:users:read");

@@ -2,7 +2,9 @@ package com.sympauthy.testcontainers.flow;
 
 import com.nimbusds.jwt.SignedJWT;
 import com.sympauthy.testcontainers.AbstractSympauthyContainerIT;
+import com.sympauthy.testcontainers.Client;
 import com.sympauthy.testcontainers.SympauthyContainer;
+import com.sympauthy.testcontainers.client.TokenResponse;
 import org.junit.jupiter.api.Test;
 
 import java.text.ParseException;
@@ -45,7 +47,7 @@ class SignInWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
 
     @Test
     void signsInAsAPreviouslySignedUpUser() throws Exception {
-        try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(CLIENT_ID)
+        try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient(CLIENT_ID))
                         .withScopes("openid");
                 SympauthyContainer sympauthy = new SympauthyContainer()
                         .withConfig(config(registry))

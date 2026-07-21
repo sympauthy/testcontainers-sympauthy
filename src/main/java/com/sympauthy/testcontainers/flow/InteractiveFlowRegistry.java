@@ -2,6 +2,11 @@ package com.sympauthy.testcontainers.flow;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.sympauthy.testcontainers.Client;
+import com.sympauthy.testcontainers.client.FlowApiClient;
+import com.sympauthy.testcontainers.client.FlowResponse;
+import com.sympauthy.testcontainers.client.TokenClient;
+import com.sympauthy.testcontainers.internal.json.JsonCodec;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -41,7 +46,7 @@ import java.util.Map;
  * start the container and {@link InteractiveFlow#run()} each flow:
  *
  * <pre>{@code
- * try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient("test-app")
+ * try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app"))
  *         .withScopes("openid");
  *      SympauthyContainer container = new SympauthyContainer()
  *         .withConfig(passwordAuthAndClaims)
@@ -66,7 +71,8 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
-    private final String clientId;
+    // The client these flows authenticate as — public (PKCE only) or confidential (sends a secret).
+    private final Client client;
     private final HttpServer server;
     private final String frontendBaseUrl;
 
@@ -88,8 +94,8 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
     private volatile String capturedState;
     private volatile RuntimeException failure;
 
-    private InteractiveFlowRegistry(String clientId) {
-        this.clientId = clientId;
+    private InteractiveFlowRegistry(Client client) {
+        this.client = client;
         try {
             this.server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         } catch (IOException e) {
@@ -100,9 +106,15 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         server.start();
     }
 
-    /** Creates a mock frontend that will authenticate as the given client id. */
-    public static InteractiveFlowRegistry forClient(String clientId) {
-        return new InteractiveFlowRegistry(clientId);
+    /**
+     * Creates a mock frontend that authenticates as the given {@link Client} — {@link Client#publicClient
+     * public} (PKCE only) or {@link Client#confidentialClient confidential} (whose secret the token
+     * exchange sends via {@code client_secret_post} or {@code client_secret_basic}). Declare a matching
+     * {@code clients.<id>} (and, for a confidential client, {@code clients.<id>.secret}, which
+     * {@link #clientSecret()} exposes so the sent and configured secrets stay in sync).
+     */
+    public static InteractiveFlowRegistry forClient(Client client) {
+        return new InteractiveFlowRegistry(client);
     }
 
     /** The SympAuthy {@code flows.<id>} these flows back (default {@code "default"}). */
@@ -123,9 +135,22 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         return flow;
     }
 
+    /** The {@link Client} these flows authenticate as. */
+    public Client client() {
+        return client;
+    }
+
     /** The client id these flows authenticate as; configure a matching {@code clients.<id>}. */
     public String clientId() {
-        return clientId;
+        return client.id();
+    }
+
+    /**
+     * The client secret these flows authenticate with, or {@code null} for a public client. Use it to
+     * declare a matching {@code clients.<id>.secret}, keeping the sent and configured secrets in sync.
+     */
+    public String clientSecret() {
+        return client.secret();
     }
 
     /** The flow id this frontend backs; set your client's {@code authorizationFlow} to it. */
@@ -208,8 +233,9 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
                     + ", HTTP " + response.statusCode() + ")");
         }
         emit(FlowStep.Type.COMPLETED, Map.of("code", capturedCode));
-        return new AuthorizationResult(capturedCode, capturedState, tokenEndpoint, redirectUri(),
-                clientId, null, pkce.codeVerifier, apiClient);
+        TokenClient tokenClient = new TokenClient(tokenEndpoint, apiClient, client);
+        return new AuthorizationResult(capturedCode, capturedState, redirectUri(), pkce.codeVerifier,
+                tokenClient);
     }
 
     /** Stops the mock frontend server. */
@@ -293,8 +319,8 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
 
     // --- helpers ---
 
-    private Map<String, Object> fetchDiscovery(HttpClient client) {
-        HttpResponse<String> response = send(client, HttpRequest.newBuilder(URI.create(discoveryUrl))
+    private Map<String, Object> fetchDiscovery(HttpClient httpClient) {
+        HttpResponse<String> response = send(httpClient, HttpRequest.newBuilder(URI.create(discoveryUrl))
                 .header("Accept", "application/json").GET().build());
         if (response.statusCode() != 200) {
             throw new FlowException("Discovery document returned HTTP " + response.statusCode());
@@ -305,7 +331,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
     private Map<String, String> authorizeParams(String oauthState, Pkce pkce) {
         Map<String, String> params = new LinkedHashMap<>();
         params.put("response_type", "code");
-        params.put("client_id", clientId);
+        params.put("client_id", client.id());
         params.put("redirect_uri", redirectUri());
         params.put("scope", String.join(" ", scopes));
         params.put("state", oauthState);

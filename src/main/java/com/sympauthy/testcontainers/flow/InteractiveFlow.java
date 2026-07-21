@@ -1,5 +1,7 @@
 package com.sympauthy.testcontainers.flow;
 
+import com.sympauthy.testcontainers.client.TokenResponse;
+
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 

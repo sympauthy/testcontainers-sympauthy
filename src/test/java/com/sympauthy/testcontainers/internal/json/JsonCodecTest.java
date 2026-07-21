@@ -1,4 +1,4 @@
-package com.sympauthy.testcontainers.flow;
+package com.sympauthy.testcontainers.internal.json;
 
 import org.junit.jupiter.api.Test;
 

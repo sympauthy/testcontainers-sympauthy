@@ -1,4 +1,4 @@
-package com.sympauthy.testcontainers.flow;
+package com.sympauthy.testcontainers.client;
 
 import java.util.Map;
 

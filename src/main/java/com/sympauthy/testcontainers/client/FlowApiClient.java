@@ -1,4 +1,6 @@
-package com.sympauthy.testcontainers.flow;
+package com.sympauthy.testcontainers.client;
+
+import com.sympauthy.testcontainers.internal.json.JsonCodec;
 
 import java.io.IOException;
 import java.net.URI;
@@ -15,8 +17,8 @@ import java.util.Map;
  * the Flow API's state-transport rules: GET requests carry the flow state as a {@code ?state=} query
  * parameter, POST requests carry it in an {@code Authorization: State <jwt>} header.
  *
- * <p>Use this directly to drive custom or partial flows; {@link InteractiveFlow} builds on it to run
- * the whole flow with per-step callbacks.
+ * <p>Use this directly to drive custom or partial flows; the {@code flow} package's InteractiveFlow
+ * builds on it to run the whole flow with per-step callbacks.
  */
 public final class FlowApiClient {
 
@@ -89,10 +91,10 @@ public final class FlowApiClient {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             return new FlowResponse(response.statusCode(), parseBody(response.body()));
         } catch (IOException e) {
-            throw new FlowException("Flow API call to " + request.uri() + " failed", e);
+            throw new SympauthyApiException("Flow API call to " + request.uri() + " failed", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new FlowException("Flow API call interrupted", e);
+            throw new SympauthyApiException("Flow API call interrupted", e);
         }
     }
 
