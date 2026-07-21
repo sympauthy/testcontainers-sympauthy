@@ -25,7 +25,7 @@ repositories {
 }
 
 dependencies {
-    testImplementation("com.sympauthy:testcontainers-sympauthy:0.1.0")
+    testImplementation("com.sympauthy:testcontainers-sympauthy:x.x.x")
 }
 ```
 
@@ -57,7 +57,7 @@ Then reference the repository and dependency in your `pom.xml`:
   <dependency>
     <groupId>com.sympauthy</groupId>
     <artifactId>testcontainers-sympauthy</artifactId>
-    <version>0.1.0</version>
+    <version>x.x.x</version>
     <scope>test</scope>
   </dependency>
 </dependencies>
