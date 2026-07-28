@@ -2,6 +2,13 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      skip_integration_tests:
+        description: >-
+          Publish without running the integration tests. Use only when the SympAuthy
+          image the ITs need is not published yet (they would otherwise fail).
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # create the git tag + GitHub release
@@ -49,14 +56,21 @@ jobs:
             *)   echo "::error::Unexpected HTTP $code checking the registry"; exit 1 ;;
           esac
 
-      # (c) Run BOTH suites, reusing the existing composite action (JDK 17 + Gradle setup included).
+      # (c) Loudly record when a release skips the integration tests.
+      - name: Warn when skipping integration tests
+        if: ${{ inputs.skip_integration_tests }}
+        shell: bash
+        run: echo "::warning::Integration tests skipped for this release (skip_integration_tests=true). Ensure the SympAuthy image the ITs need is published before consumers rely on this version."
+
+      # (d) Run the unit tests (always) and the integration tests (unless bypassed),
+      #     reusing the existing composite action (JDK 17 + Gradle setup included).
       - name: Run unit and integration tests
         uses: ./.github/actions/test
         with:
           unit: "true"
-          integration: "true"
+          integration: ${{ !inputs.skip_integration_tests }}
 
-      # (d) Build + publish the artifact to GitHub Packages.
+      # (e) Build + publish the artifact to GitHub Packages.
       #     The JDK/Gradle setup from the test action above persists for this step.
       - name: Publish to GitHub Packages
         shell: bash
@@ -65,7 +79,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew publishMavenPublicationToGitHubPackagesRepository
 
-      # (e) Tag + create the GitHub release (only reached on a successful publish).
+      # (f) Tag + create the GitHub release (only reached on a successful publish).
       - name: Create GitHub release
         shell: bash
         env:
