@@ -281,16 +281,24 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
     }
 
     private String authenticatePage(String state) {
-        FlowResponse configResponse = api.getConfiguration(state);
-        FlowConfiguration configuration = FlowConfiguration.fromMap(configResponse.body());
         if (active.signInHandler != null) {
-            Credentials credentials = active.signInHandler.signIn(configuration);
-            emit(FlowStep.Type.SIGN_IN, configResponse.body());
+            FlowResponse response = api.getSignIn(state);
+            if (response.redirectUrl() != null) {
+                throw new FlowException("sign-in step is not available for this attempt "
+                        + "(server redirected to " + response.redirectUrl() + ")");
+            }
+            Credentials credentials = active.signInHandler.signIn(SignInFlowResource.fromMap(response.body()));
+            emit(FlowStep.Type.SIGN_IN, response.body());
             return requireRedirect(api.signIn(state, credentials.login(), credentials.password()), "sign-in");
         }
         if (active.signUpHandler != null) {
-            Map<String, Object> fields = active.signUpHandler.signUp(configuration);
-            emit(FlowStep.Type.SIGN_UP, configResponse.body());
+            FlowResponse response = api.getSignUp(state);
+            if (response.redirectUrl() != null) {
+                throw new FlowException("sign-up step is not available for this attempt "
+                        + "(server redirected to " + response.redirectUrl() + ")");
+            }
+            Map<String, Object> fields = active.signUpHandler.signUp(SignUpFlowResource.fromMap(response.body()));
+            emit(FlowStep.Type.SIGN_UP, response.body());
             return requireRedirect(api.signUp(state, fields), "sign-up");
         }
         throw new FlowException(

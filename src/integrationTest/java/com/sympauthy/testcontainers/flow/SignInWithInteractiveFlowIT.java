@@ -49,7 +49,7 @@ class SignInWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
     void signsInAsAPreviouslySignedUpUser() throws Exception {
         try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient(CLIENT_ID))
                         .withScopes("openid");
-                SympauthyContainer sympauthy = new SympauthyContainer()
+                SympauthyContainer sympauthy = newContainer()
                         .withConfig(config(registry))
                         .withFlows(registry)) {
             InteractiveFlow signUp = registry.newFlow()

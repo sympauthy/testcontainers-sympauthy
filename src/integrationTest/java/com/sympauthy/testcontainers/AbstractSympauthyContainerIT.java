@@ -1,5 +1,7 @@
 package com.sympauthy.testcontainers;
 
+import org.testcontainers.utility.DockerImageName;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -29,6 +31,19 @@ public abstract class AbstractSympauthyContainerIT {
 
     /** Present in discovery only when the {@code email} claim has been enabled. */
     protected static final String EMAIL_CLAIM_MARKER = "email_verified";
+
+    /**
+     * Creates a container from the default nightly image, or from the image named by the
+     * {@code -Dsympauthy.image=<ref>} system property when set (e.g. a locally built {@code sympauthy:it}).
+     * The override is marked as a compatible substitute so it passes the constructor's image check.
+     */
+    protected static SympauthyContainer newContainer() {
+        String image = System.getProperty("sympauthy.image");
+        return image == null
+                ? new SympauthyContainer()
+                : new SympauthyContainer(
+                        DockerImageName.parse(image).asCompatibleSubstituteFor(SympauthyContainer.DEFAULT_IMAGE_NAME));
+    }
 
     /** Fetches the discovery document, asserting it is served and advertises the pinned issuer. */
     protected static String fetchDiscovery(SympauthyContainer sympauthy) throws Exception {

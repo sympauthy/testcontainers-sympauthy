@@ -10,5 +10,5 @@ import java.util.Map;
 @FunctionalInterface
 public interface SignUpHandler {
 
-    Map<String, Object> signUp(FlowConfiguration configuration);
+    Map<String, Object> signUp(SignUpFlowResource resource);
 }

@@ -11,7 +11,6 @@ public record FlowStep(Type type, Map<String, Object> data) {
 
     /** The kind of step reached. */
     public enum Type {
-        CONFIGURATION,
         SIGN_IN,
         SIGN_UP,
         MFA,

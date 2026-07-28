@@ -24,7 +24,7 @@ class InlineYamlConfigIT extends AbstractSympauthyContainerIT {
 
     @Test
     void appliesMountedConfigFile() throws Exception {
-        try (SympauthyContainer sympauthy = new SympauthyContainer()
+        try (SympauthyContainer sympauthy = newContainer()
                 .withYamlConfig(EMAIL_PASSWORD_YAML)) {
             sympauthy.start();
 

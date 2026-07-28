@@ -23,7 +23,7 @@ class NestedConfigMapIT extends AbstractSympauthyContainerIT {
 
     @Test
     void appliesNestedConfigMap() throws Exception {
-        try (SympauthyContainer sympauthy = new SympauthyContainer()
+        try (SympauthyContainer sympauthy = newContainer()
                 .withConfig(EMAIL_PASSWORD_CONFIG)) {
             sympauthy.start();
 

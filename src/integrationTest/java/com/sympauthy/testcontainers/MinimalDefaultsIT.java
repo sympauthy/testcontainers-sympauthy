@@ -12,7 +12,7 @@ class MinimalDefaultsIT extends AbstractSympauthyContainerIT {
 
     @Test
     void servesDiscoveryWithMinimalDefaults() throws Exception {
-        try (SympauthyContainer sympauthy = new SympauthyContainer()) {
+        try (SympauthyContainer sympauthy = newContainer()) {
             sympauthy.start();
 
             String discovery = fetchDiscovery(sympauthy);

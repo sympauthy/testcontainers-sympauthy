@@ -44,7 +44,7 @@ class InteractiveFlowTest {
             assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED), flow.stepTypes());
 
             // State transport across the mock frontend's server-side Flow API calls.
-            assertEquals(FLOW_STATE, sympauthy.firstRequest("GET", "/api/v1/flow/configuration").stateQueryParam());
+            assertEquals(FLOW_STATE, sympauthy.firstRequest("GET", "/api/v1/flow/sign-up").stateQueryParam());
             assertEquals("State " + FLOW_STATE,
                     sympauthy.firstRequest("POST", "/api/v1/flow/sign-up").headers().get("Authorization"));
 
@@ -244,8 +244,10 @@ class InteractiveFlowTest {
         // /authorize sends the browser to the mock frontend's sign-in page with a state token.
         sympauthy.route("GET", "/api/oauth2/authorize", request ->
                 TestFlowServer.Response.seeOther(registry.frontendUrl() + "/sign-in?state=" + FLOW_STATE));
-        sympauthy.route("GET", "/api/v1/flow/configuration", request -> TestFlowServer.Response.json(200,
-                "{\"features\":{\"password_sign_in\":true,\"sign_up_enabled\":true},\"claims\":[]}"));
+        sympauthy.route("GET", "/api/v1/flow/sign-in", request -> TestFlowServer.Response.json(200,
+                "{\"password\":{\"identifier_claims\":[\"email\"]},\"providers\":[]}"));
+        sympauthy.route("GET", "/api/v1/flow/sign-up", request -> TestFlowServer.Response.json(200,
+                "{\"password\":{\"identifier_claims\":[\"email\"]},\"claims\":[]}"));
         sympauthy.route("POST", "/api/oauth2/token", request -> TestFlowServer.Response.json(200,
                 "{\"access_token\":\"at\",\"id_token\":\"it\",\"token_type\":\"Bearer\",\"expires_in\":3600}"));
     }

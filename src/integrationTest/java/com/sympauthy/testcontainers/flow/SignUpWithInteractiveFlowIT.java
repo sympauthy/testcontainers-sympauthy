@@ -47,7 +47,7 @@ class SignUpWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
     void signsUpAndExchangesCodeForTokens() throws Exception {
         try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient(CLIENT_ID))
                         .withScopes("openid");
-                SympauthyContainer sympauthy = new SympauthyContainer()
+                SympauthyContainer sympauthy = newContainer()
                         .withConfig(config(registry))
                         .withFlows(registry)) {
             InteractiveFlow flow = registry.newFlow()

@@ -34,8 +34,12 @@ public final class FlowApiClient {
         this.httpClient = httpClient;
     }
 
-    public FlowResponse getConfiguration(String state) {
-        return get("/api/v1/flow/configuration", state);
+    public FlowResponse getSignIn(String state) {
+        return get("/api/v1/flow/sign-in", state);
+    }
+
+    public FlowResponse getSignUp(String state) {
+        return get("/api/v1/flow/sign-up", state);
     }
 
     public FlowResponse signIn(String state, String login, String password) {

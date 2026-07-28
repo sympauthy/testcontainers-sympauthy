@@ -7,5 +7,5 @@ package com.sympauthy.testcontainers.flow;
 @FunctionalInterface
 public interface SignInHandler {
 
-    Credentials signIn(FlowConfiguration configuration);
+    Credentials signIn(SignInFlowResource resource);
 }

@@ -105,6 +105,8 @@ tasks.register<Test>("integrationTest") {
     testClassesDirs = integrationTest.output.classesDirs
     classpath = integrationTest.runtimeClasspath
     shouldRunAfter("test")
+    // Optionally point the ITs at a locally built image, e.g. -Dsympauthy.image=sympauthy:it
+    System.getProperty("sympauthy.image")?.let { systemProperty("sympauthy.image", it) }
 }
 
 // We publish a hand-built POM for the shaded jar; a Gradle Module Metadata (.module) file describing

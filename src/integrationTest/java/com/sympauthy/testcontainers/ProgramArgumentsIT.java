@@ -14,7 +14,7 @@ class ProgramArgumentsIT extends AbstractSympauthyContainerIT {
 
     @Test
     void appliesProgramArgumentOverrides() throws Exception {
-        try (SympauthyContainer sympauthy = new SympauthyContainer()
+        try (SympauthyContainer sympauthy = newContainer()
                 .withEnvironments("default", "admin")
                 .withProperties(Map.of("claims.email.enabled", "true"))) {
             sympauthy.start();
