@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -50,8 +51,12 @@ class SignUpWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
                 SympauthyContainer sympauthy = newContainer()
                         .withConfig(config(registry))
                         .withFlows(registry)) {
+            AtomicReference<SignUpFlowResource> signUpResource = new AtomicReference<>();
             InteractiveFlow flow = registry.newFlow()
-                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!"));
+                    .withSignUpHandler(resource -> {
+                        signUpResource.set(resource);
+                        return Map.of("email", "ada@example.com", "password", "Str0ngP@ssw0rd!");
+                    });
             try {
                 sympauthy.start();
 
@@ -59,6 +64,20 @@ class SignUpWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
 
                 assertEquals(List.of(FlowStep.Type.SIGN_UP, FlowStep.Type.COMPLETED), flow.stepTypes());
                 assertNotNull(result.code(), "should receive an authorization code");
+
+                // The server (post-#283) advertises password identifier claims as full objects (id, name,
+                // type, ...) rather than bare id strings. Assert the module parses that shape and surfaces
+                // each claim's metadata — matching by exact id would fail if entries were still strings.
+                SignUpFlowResource resource = signUpResource.get();
+                assertNotNull(resource, "sign-up handler should have received the flow resource");
+                assertTrue(resource.passwordEnabled(), "sign-up should offer password auth");
+                Claim emailClaim = resource.passwordIdentifierClaims().stream()
+                        .filter(claim -> "email".equals(claim.id()))
+                        .findFirst()
+                        .orElseThrow(() -> new AssertionError(
+                                "expected an 'email' identifier claim, got: " + resource.passwordIdentifierClaims()));
+                assertNotNull(emailClaim.name(), "the identifier claim should carry its display name metadata");
+                assertEquals("email", emailClaim.type(), "the identifier claim should carry its type metadata");
 
                 TokenResponse tokens = result.exchange();
                 assertNotNull(tokens.accessToken(), "token response should carry an access token");

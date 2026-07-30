@@ -25,6 +25,9 @@ class InteractiveFlowTest {
 
     private static final String FLOW_STATE = "flow-state-jwt";
     private static final String CODE = "auth-code-123";
+    /** A password {@code identifier_claims} entry in the post-#283 full-object shape. */
+    private static final String IDENTIFIER_CLAIM =
+            "{\"id\":\"email\",\"required\":true,\"name\":\"Email\",\"type\":\"string\",\"group\":null}";
 
     @Test
     void drivesSignUpToACodeAndTokens() {
@@ -245,9 +248,9 @@ class InteractiveFlowTest {
         sympauthy.route("GET", "/api/oauth2/authorize", request ->
                 TestFlowServer.Response.seeOther(registry.frontendUrl() + "/sign-in?state=" + FLOW_STATE));
         sympauthy.route("GET", "/api/v1/flow/sign-in", request -> TestFlowServer.Response.json(200,
-                "{\"password\":{\"identifier_claims\":[\"email\"]},\"providers\":[]}"));
+                "{\"password\":{\"identifier_claims\":[" + IDENTIFIER_CLAIM + "]},\"providers\":[]}"));
         sympauthy.route("GET", "/api/v1/flow/sign-up", request -> TestFlowServer.Response.json(200,
-                "{\"password\":{\"identifier_claims\":[\"email\"]},\"claims\":[]}"));
+                "{\"password\":{\"identifier_claims\":[" + IDENTIFIER_CLAIM + "]}}"));
         sympauthy.route("POST", "/api/oauth2/token", request -> TestFlowServer.Response.json(200,
                 "{\"access_token\":\"at\",\"id_token\":\"it\",\"token_type\":\"Bearer\",\"expires_in\":3600}"));
     }

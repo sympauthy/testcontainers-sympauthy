@@ -21,14 +21,14 @@ public final class SignInFlowResource {
     }
 
     private final boolean passwordEnabled;
-    private final List<String> passwordIdentifierClaims;
+    private final List<Claim> passwordIdentifierClaims;
     private final List<Provider> providers;
     private final String signUpRedirectUrl;
     private final Map<String, Object> raw;
 
     private SignInFlowResource(
             boolean passwordEnabled,
-            List<String> passwordIdentifierClaims,
+            List<Claim> passwordIdentifierClaims,
             List<Provider> providers,
             String signUpRedirectUrl,
             Map<String, Object> raw) {
@@ -39,14 +39,17 @@ public final class SignInFlowResource {
         this.raw = raw;
     }
 
+    @SuppressWarnings("unchecked")
     static SignInFlowResource fromMap(Map<String, Object> map) {
         Map<String, Object> password = asMap(map.get("password"));
         boolean passwordEnabled = map.get("password") instanceof Map<?, ?>;
 
-        List<String> identifierClaims = new ArrayList<>();
+        List<Claim> identifierClaims = new ArrayList<>();
         if (password.get("identifier_claims") instanceof List<?> ids) {
-            for (Object id : ids) {
-                identifierClaims.add(String.valueOf(id));
+            for (Object element : ids) {
+                if (element instanceof Map<?, ?> claimMap) {
+                    identifierClaims.add(Claim.fromMap((Map<String, Object>) claimMap));
+                }
             }
         }
 
@@ -75,8 +78,11 @@ public final class SignInFlowResource {
         return passwordEnabled;
     }
 
-    /** The claims that identify a user for password sign-in (e.g. {@code email}). */
-    public List<String> passwordIdentifierClaims() {
+    /**
+     * The claims that identify a user for password sign-in (e.g. {@code email}), each with its full
+     * metadata ({@code id}, {@code required}, {@code name}, {@code type}, {@code group}).
+     */
+    public List<Claim> passwordIdentifierClaims() {
         return passwordIdentifierClaims;
     }
 

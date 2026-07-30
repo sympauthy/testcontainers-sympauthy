@@ -6,9 +6,13 @@ import java.util.Map;
 
 /**
  * Parsed {@code GET /api/v1/flow/sign-up} response: what the server asks for on the sign-up step. Passed
- * to a {@link SignUpHandler} so a test can build the field map from what the server advertises (password
- * identifiers, claimable fields, whether a sign-in cross-link exists). {@link #raw()} exposes the full
- * body for anything not surfaced here.
+ * to a {@link SignUpHandler} so a test can build the field map from what the server advertises (the
+ * password identifier claims to collect, whether a sign-in cross-link exists). {@link #raw()} exposes
+ * the full body for anything not surfaced here.
+ *
+ * <p>The password identifier claims are the fields sign-up collects: they uniquely identify the user and
+ * are the only claims saved on sign-up — any other submitted claim is discarded. Each carries its full
+ * metadata ({@code id}, {@code required}, {@code name}, {@code type}, {@code group}) as a {@link Claim}.
  *
  * <p>The server omits null fields entirely, so {@link #passwordEnabled()} reflects whether the
  * {@code password} object was present and {@link #signInRedirectUrl()} is {@code null} when the flow
@@ -17,20 +21,17 @@ import java.util.Map;
 public final class SignUpFlowResource {
 
     private final boolean passwordEnabled;
-    private final List<String> passwordIdentifierClaims;
-    private final List<Claim> claims;
+    private final List<Claim> passwordIdentifierClaims;
     private final String signInRedirectUrl;
     private final Map<String, Object> raw;
 
     private SignUpFlowResource(
             boolean passwordEnabled,
-            List<String> passwordIdentifierClaims,
-            List<Claim> claims,
+            List<Claim> passwordIdentifierClaims,
             String signInRedirectUrl,
             Map<String, Object> raw) {
         this.passwordEnabled = passwordEnabled;
         this.passwordIdentifierClaims = List.copyOf(passwordIdentifierClaims);
-        this.claims = List.copyOf(claims);
         this.signInRedirectUrl = signInRedirectUrl;
         this.raw = raw;
     }
@@ -40,18 +41,11 @@ public final class SignUpFlowResource {
         Map<String, Object> password = asMap(map.get("password"));
         boolean passwordEnabled = map.get("password") instanceof Map<?, ?>;
 
-        List<String> identifierClaims = new ArrayList<>();
+        List<Claim> identifierClaims = new ArrayList<>();
         if (password.get("identifier_claims") instanceof List<?> ids) {
-            for (Object id : ids) {
-                identifierClaims.add(String.valueOf(id));
-            }
-        }
-
-        List<Claim> claims = new ArrayList<>();
-        if (map.get("claims") instanceof List<?> claimList) {
-            for (Object element : claimList) {
+            for (Object element : ids) {
                 if (element instanceof Map<?, ?> claimMap) {
-                    claims.add(Claim.fromMap((Map<String, Object>) claimMap));
+                    identifierClaims.add(Claim.fromMap((Map<String, Object>) claimMap));
                 }
             }
         }
@@ -59,7 +53,6 @@ public final class SignUpFlowResource {
         return new SignUpFlowResource(
                 passwordEnabled,
                 identifierClaims,
-                claims,
                 str(map.get("sign_in_redirect_url")),
                 map);
     }
@@ -69,14 +62,12 @@ public final class SignUpFlowResource {
         return passwordEnabled;
     }
 
-    /** The claims that identify a user for password sign-up (e.g. {@code email}). */
-    public List<String> passwordIdentifierClaims() {
+    /**
+     * The claims that identify a user for password sign-up (e.g. {@code email}) — also the claims sign-up
+     * collects and saves, each with its full metadata.
+     */
+    public List<Claim> passwordIdentifierClaims() {
         return passwordIdentifierClaims;
-    }
-
-    /** The claimable fields the sign-up step asks the user to provide. */
-    public List<Claim> claims() {
-        return claims;
     }
 
     /** The URL of the sign-in page the flow cross-links to, or {@code null} when sign-in is not offered. */

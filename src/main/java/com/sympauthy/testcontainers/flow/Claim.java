@@ -3,8 +3,11 @@ package com.sympauthy.testcontainers.flow;
 import java.util.Map;
 
 /**
- * A claim the flow asks the user to provide during the collect-claims step. Mirrors an entry of the
- * {@code claims} array returned by {@code GET /api/v1/flow/claims}.
+ * A claim the flow asks the user to provide: an entry of the {@code claims} array returned by
+ * {@code GET /api/v1/flow/claims} (the collect-claims step) or of the {@code password.identifier_claims}
+ * array on the sign-in / sign-up steps. Identifier-claim entries omit the collect-claims-only fields
+ * ({@code collected}, {@code value}, {@code suggested_value}), which then default to {@code false}/
+ * {@code null}.
  */
 public record Claim(
         String id,
