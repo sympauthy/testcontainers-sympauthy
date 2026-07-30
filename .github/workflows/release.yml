@@ -49,7 +49,9 @@ jobs:
         run: |
           v="${{ steps.version.outputs.version }}"
           url="https://maven.pkg.github.com/${{ github.repository }}/com/sympauthy/testcontainers-sympauthy/${v}/testcontainers-sympauthy-${v}.pom"
-          code="$(curl -s -o /dev/null -w '%{http_code}' -u "${{ github.actor }}:${GITHUB_TOKEN}" "$url")"
+          # -L: the registry answers an *existing* version with a 302 redirect to the blob store; follow
+          # it so %{http_code} is the final 200 (published) or 404 (not yet), never the bare 302.
+          code="$(curl -sL -o /dev/null -w '%{http_code}' -u "${{ github.actor }}:${GITHUB_TOKEN}" "$url")"
           case "$code" in
             200) echo "::error::Version $v is already published to GitHub Packages"; exit 1 ;;
             404) echo "Version $v not published yet (HTTP 404) — proceeding" ;;
