@@ -246,9 +246,8 @@ TokenResponse tokens = signIn.run().exchange();   // signs in as that user
 ```
 
 > The frontend covers the password happy path (sign-in/sign-up → collect claims → code), the confirm
-> step, and TOTP multi-factor auth — see [Client- or admin-initiated interactive
-> flows](#client--or-admin-initiated-interactive-flows). Enforced email/SMS claim validation raises
-> `UnsupportedFlowStepException`.
+> step, and [TOTP multi-factor auth](#multi-factor-authentication-totp). Enforced email/SMS claim
+> validation raises `UnsupportedFlowStepException`.
 
 ### Public client
 
@@ -278,6 +277,37 @@ Map<String, Object> clientConfig = Map.of(
     "allowed-scopes", List.of("openid"),
     "allowed-redirect-uris", List.of(registry.redirectUri()));
 ```
+
+### Multi-factor authentication (TOTP)
+
+MFA applies to any flow, not only [client- or admin-initiated](#client--or-admin-initiated-interactive-flows)
+ones — an already-enrolled user must answer a **TOTP challenge** on a normal sign-in. Enable MFA on the
+container with `withMfa()` (optional TOTP: `mfa.required=false`, `mfa.totp.enabled=true`) and have the
+mock frontend serve the confirm/MFA pages with `registry.withMfaEnrollment()` (SympAuthy *requires* those
+flow pages once MFA is on). Three more per-flow callbacks then drive the confirm and MFA steps:
+
+| Callback | Purpose |
+| -------------------------------------------------- | ------------------------------------------------------------------ |
+| `withConfirmHandler(ConfirmHandler)`               | approve (`ConfirmDecision.CONFIRM`) or decline (`CANCEL`) an action a client/admin asked the user to confirm; the resource exposes `action()` and `initiatingClientId()` (`null` when an admin initiated it) |
+| `withTotpEnrollmentHandler(TotpEnrollmentHandler)` | observe the enrolment secret or override the submitted code (default: compute a valid one) |
+| `withTotpChallengeHandler(TotpChallengeHandler)`   | supply the code answering a TOTP challenge |
+
+TOTP codes are computed for you from the shared secret; the dependency-free `Totp` (RFC 6238) is public,
+so you can compute one yourself — for example, to answer a challenge with the secret captured at
+enrolment:
+
+```java
+InteractiveFlow signIn = registry.newFlow()
+    .withSignInHandler(cfg -> Credentials.of(email, password))
+    .withTotpChallengeHandler(() -> Totp.code(secret));   // secret captured at enrolment
+
+TokenResponse tokens = signIn.run().exchange();
+assertTrue(signIn.stepTypes().contains(FlowStep.Type.MFA));   // the challenge was answered
+```
+
+With optional MFA a normal sign-up does not force enrolment. To enrol a user on demand — the `confirm`
+step and auto-driven TOTP enrolment — start a
+[client- or admin-initiated flow](#client--or-admin-initiated-interactive-flows).
 
 ## Creating an admin user (Admin API)
 
@@ -342,30 +372,26 @@ unlike a normal sign-in, does not begin at `/authorize` but at a link the initia
 Today the only action is enrolling **TOTP MFA** (`ENROLL_MFA`); the mechanism is general and more
 actions will follow.
 
-The module stays out of the initiation call and its authentication: **you** call the entry point, then
-hand the flow the link it returns plus the success/cancel URLs you passed, and `drive()` reports which
-one was reached (`SUCCESS` or `CANCELED`).
+Two entry points start such a flow and return that link (a `redirect_url` pointing at the confirm page):
 
 - **Client-initiated:** `POST /api/v1/client/mfa/enrollment` with a `client_credentials` token holding
   `users:mfa:write`, and the target user's access token in the body.
 - **Admin-initiated:** `POST /api/v1/admin/users/{userId}/mfa/enrollment` with an admin token (see
   [Creating an admin user](#creating-an-admin-user-admin-api)).
 
-Because today's only action enrols MFA, turn it on with `withMfa()` (optional TOTP: `mfa.required=false`,
-`mfa.totp.enabled=true`) and have the mock frontend serve the confirm/MFA pages with
-`registry.withMfaEnrollment()` — SympAuthy *requires* those flow pages once MFA is on:
+The module stays out of that initiation call: **you** invoke the entry point, then hand the returned link
+plus the success/cancel URLs you passed to `driveFrom(startUrl, successUrl, cancelUrl)` and call
+`drive()`. It walks the flow — driving the confirm and MFA steps with the [handlers described under
+Driving the interactive flow](#multi-factor-authentication-totp) — to a terminal and returns a
+`FlowResult`: `SUCCESS` if it reached the success URL, `CANCELED` if it reached the cancel URL.
+
+Build the registry with `withMfaEnrollment()` and the container with `withMfa()` (today's action enrols
+MFA, so the frontend must serve the confirm/MFA pages), then call the entry point and drive the link:
 
 ```java
 InteractiveFlowRegistry registry = InteractiveFlowRegistry
-    .forClient(Client.confidentialClient("mfa-app", "s3cr3t"))
-    .withScopes("openid")
-    .withMfaEnrollment();          // serve the confirm + mfa-* pages
-```
+    .forClient(Client.confidentialClient("mfa-app", "s3cr3t")).withScopes("openid").withMfaEnrollment();
 
-Both entry points return a `redirect_url` (the confirm page). Drive it with `driveFrom(...).drive()`: a
-`ConfirmHandler` approves or cancels, and TOTP enrolment is auto-driven from the secret the server issues.
-
-```java
 String successUrl = registry.frontendUrl() + "/mfa-return";   // the return_uri you pass the API
 String cancelUrl  = registry.frontendUrl() + "/mfa-cancel";   // the cancel_uri you pass the API
 
@@ -423,19 +449,10 @@ try (registry;
 }
 ```
 
-The confirm step's callbacks:
-
-| Callback | Purpose |
-| ------------------------------------------------- | ------------------------------------------------------------------ |
-| `withConfirmHandler(ConfirmHandler)`              | approve (`ConfirmDecision.CONFIRM`) or decline (`CANCEL`) the initiated action; the resource exposes `action()` and `initiatingClientId()` (`null` when an admin initiated it) |
-| `withTotpEnrollmentHandler(TotpEnrollmentHandler)` | observe the enrolment secret or override the submitted code (default: compute a valid one) |
-| `withTotpChallengeHandler(TotpChallengeHandler)`   | supply the code answering a TOTP challenge, computed with `Totp.code(secret)` |
-
-`driveFrom(startUrl, successUrl, cancelUrl)` verifies all three URLs belong to the mock frontend, and
-`drive()` returns a `FlowResult` whose `outcome()` is `SUCCESS` or `CANCELED`. The `successUrl` /
-`cancelUrl` are the `return_uri` / `cancel_uri` you pass the initiating API — register them as the
-client's redirect URIs. The **admin-initiated** endpoint works the same way with an admin token instead
-of a client-credentials one.
+`driveFrom(startUrl, successUrl, cancelUrl)` verifies all three URLs belong to the mock frontend; the
+`successUrl` / `cancelUrl` are the `return_uri` / `cancel_uri` you pass the initiating API — register
+them as the client's redirect URIs. The **admin-initiated** endpoint works the same way with an admin
+token instead of a client-credentials one.
 
 > **Two server-side settings a server-initiated flow needs** (both shown above). A standalone flow
 > resolves its pages from the **default client template**, so point it at your flow with
@@ -443,21 +460,6 @@ of a client-credentials one.
 > pages on the container itself. And a `client_credentials` request for the built-in `users:mfa:write`
 > scope needs the scope in the client's `allowed-scopes` **and** `features.grant-unhandled-scopes: true`
 > (or a `rules.client` granting it).
-
-### Answering a TOTP challenge on sign-in
-
-Once a user is enrolled, a normal sign-in requires a TOTP challenge. Supply the code with
-`withTotpChallengeHandler`, computing it from the enrolment secret with the built-in `Totp` (RFC 6238):
-
-```java
-TokenResponse tokens = registry.newFlow()
-    .withSignInHandler(cfg -> Credentials.of(email, password))
-    .withTotpChallengeHandler(() -> Totp.code(secret.get()))   // secret captured at enrolment
-    .run()
-    .exchange();
-
-assertTrue(/* the sign-in flow */.stepTypes().contains(FlowStep.Type.MFA));  // the challenge was answered
-```
 
 ## Requirements
 
