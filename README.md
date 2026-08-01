@@ -246,9 +246,9 @@ TokenResponse tokens = signIn.run().exchange();   // signs in as that user
 ```
 
 > The frontend covers the password happy path (sign-in/sign-up → collect claims → code), the confirm
-> step, and TOTP multi-factor auth — see [Multi-factor authentication and server-initiated
-> flows](#multi-factor-authentication-and-server-initiated-flows). Enforced email/SMS claim validation
-> raises `UnsupportedFlowStepException`.
+> step, and TOTP multi-factor auth — see [Client- or admin-initiated interactive
+> flows](#client--or-admin-initiated-interactive-flows). Enforced email/SMS claim validation raises
+> `UnsupportedFlowStepException`.
 
 ### Public client
 
@@ -334,15 +334,25 @@ invitation for other audiences with
 logged while no user has yet consented for the audience, so read it on a fresh container before
 redeeming.
 
-## Multi-factor authentication and server-initiated flows
+## Client- or admin-initiated interactive flows
 
-SympAuthy can add a **TOTP** second factor, and lets a client or an administrator **initiate** an
-interactive flow on a user's behalf — for example, to make them enrol MFA. Such a flow opens with a
-**confirm** step (the user approves or cancels the action the client/admin started) and, unlike a normal
-sign-in, does not begin at `/authorize` but at a link the initiating API hands back.
+A client or an administrator can **initiate** an interactive flow on a user's behalf. The flow opens
+with a **confirm** step — the user approves or cancels the action that was started for them — and,
+unlike a normal sign-in, does not begin at `/authorize` but at a link the initiating API hands back.
+Today the only action is enrolling **TOTP MFA** (`ENROLL_MFA`); the mechanism is general and more
+actions will follow.
 
-Enable MFA on the container with `withMfa()` (optional TOTP: `mfa.required=false`,
-`mfa.totp.enabled=true`) and tell the mock frontend to serve the confirm/MFA pages with
+The module stays out of the initiation call and its authentication: **you** call the entry point, then
+hand the flow the link it returns plus the success/cancel URLs you passed, and `drive()` reports which
+one was reached (`SUCCESS` or `CANCELED`).
+
+- **Client-initiated:** `POST /api/v1/client/mfa/enrollment` with a `client_credentials` token holding
+  `users:mfa:write`, and the target user's access token in the body.
+- **Admin-initiated:** `POST /api/v1/admin/users/{userId}/mfa/enrollment` with an admin token (see
+  [Creating an admin user](#creating-an-admin-user-admin-api)).
+
+Because today's only action enrols MFA, turn it on with `withMfa()` (optional TOTP: `mfa.required=false`,
+`mfa.totp.enabled=true`) and have the mock frontend serve the confirm/MFA pages with
 `registry.withMfaEnrollment()` — SympAuthy *requires* those flow pages once MFA is on:
 
 ```java
@@ -352,18 +362,7 @@ InteractiveFlowRegistry registry = InteractiveFlowRegistry
     .withMfaEnrollment();          // serve the confirm + mfa-* pages
 ```
 
-### Client- or admin-initiated enrolment
-
-The module stays out of the initiation call and its authentication: **you** call the entry point, then
-hand the flow the link it returns plus the success/cancel URLs you passed, and `drive()` reports which
-one was reached.
-
-- **Client-initiated:** `POST /api/v1/client/mfa/enrollment` with a `client_credentials` token holding
-  `users:mfa:write`, and the target user's access token in the body.
-- **Admin-initiated:** `POST /api/v1/admin/users/{userId}/mfa/enrollment` with an admin token (see
-  [Creating an admin user](#creating-an-admin-user-admin-api)).
-
-Both return a `redirect_url` (the confirm page). Drive it with `driveFrom(...).drive()`: a
+Both entry points return a `redirect_url` (the confirm page). Drive it with `driveFrom(...).drive()`: a
 `ConfirmHandler` approves or cancels, and TOTP enrolment is auto-driven from the secret the server issues.
 
 ```java
@@ -438,6 +437,13 @@ The confirm step's callbacks:
 client's redirect URIs. The **admin-initiated** endpoint works the same way with an admin token instead
 of a client-credentials one.
 
+> **Two server-side settings a server-initiated flow needs** (both shown above). A standalone flow
+> resolves its pages from the **default client template**, so point it at your flow with
+> `templates.clients.default.authorization-flow: <registry.flowId()>`; otherwise it falls back to
+> pages on the container itself. And a `client_credentials` request for the built-in `users:mfa:write`
+> scope needs the scope in the client's `allowed-scopes` **and** `features.grant-unhandled-scopes: true`
+> (or a `rules.client` granting it).
+
 ### Answering a TOTP challenge on sign-in
 
 Once a user is enrolled, a normal sign-in requires a TOTP challenge. Supply the code with
@@ -452,13 +458,6 @@ TokenResponse tokens = registry.newFlow()
 
 assertTrue(/* the sign-in flow */.stepTypes().contains(FlowStep.Type.MFA));  // the challenge was answered
 ```
-
-> **Two server-side settings a server-initiated flow needs** (both shown above). A standalone flow
-> resolves its pages from the **default client template**, so point it at your flow with
-> `templates.clients.default.authorization-flow: <registry.flowId()>`; otherwise it falls back to
-> pages on the container itself. And a `client_credentials` request for the built-in `users:mfa:write`
-> scope needs the scope in the client's `allowed-scopes` **and** `features.grant-unhandled-scopes: true`
-> (or a `rules.client` granting it).
 
 ## Requirements
 
