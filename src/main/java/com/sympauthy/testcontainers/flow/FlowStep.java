@@ -13,9 +13,14 @@ public record FlowStep(Type type, Map<String, Object> data) {
     public enum Type {
         SIGN_IN,
         SIGN_UP,
+        /** A signed-in user must approve (or cancel) an action a client or admin initiated on their behalf. */
+        CONFIRM,
+        /** An MFA step: choosing a method or enrolling/challenging TOTP. */
         MFA,
         CLAIMS,
         VALIDATION,
+        /** Terminal: the user cancelled the flow (e.g. denied a {@link #CONFIRM}). */
+        CANCEL,
         COMPLETED
     }
 }

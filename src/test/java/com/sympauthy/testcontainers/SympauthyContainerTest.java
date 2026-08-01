@@ -243,6 +243,42 @@ class SympauthyContainerTest {
     }
 
     @Test
+    void withMfaEnablesOptionalTotp() {
+        SympauthyContainer container = new SympauthyContainer().withMfa();
+
+        List<String> command = commandOf(container);
+        assertTrue(command.contains("-mfa.totp.enabled=true"), command.toString());
+        assertTrue(command.contains("-mfa.required=false"), command.toString());
+    }
+
+    @Test
+    void withFlowsEmitsMfaPageKeysOnlyWhenEnrollmentIsEnabled() {
+        try (InteractiveFlowRegistry plain =
+                        InteractiveFlowRegistry.forClient(Client.publicClient("app")).withFlowId("f");
+                InteractiveFlowRegistry mfa =
+                        InteractiveFlowRegistry.forClient(Client.publicClient("app")).withFlowId("f").withMfaEnrollment()) {
+
+            // Without withMfaEnrollment, the flow definition is just the password-flow page keys.
+            List<String> withoutMfa = commandOf(new SympauthyContainer().withFlows(plain));
+            assertFalse(
+                    withoutMfa.stream().anyMatch(part -> part.startsWith("-flows.f.confirm=")),
+                    withoutMfa.toString());
+            assertFalse(
+                    withoutMfa.stream().anyMatch(part -> part.startsWith("-flows.f.mfa-totp-enroll=")),
+                    withoutMfa.toString());
+
+            // With it, the confirm + all four MFA page keys (required once MFA is enabled) are declared.
+            List<String> withMfa = commandOf(new SympauthyContainer().withFlows(mfa));
+            for (String key : List.of("confirm", "mfa-selection-for-enrollment", "mfa-selection-for-challenge",
+                    "mfa-totp-enroll", "mfa-totp-challenge")) {
+                assertTrue(
+                        withMfa.stream().anyMatch(part -> part.startsWith("-flows.f." + key + "=http://localhost:")),
+                        "expected a flows.f." + key + " page URL in: " + withMfa);
+            }
+        }
+    }
+
+    @Test
     void parsesTheRawTokenLogForm() {
         String logs = "12:00:00 INFO  BootstrapInvitationManager - Bootstrap invitation 'custom' "
                 + "created for audience 'app'. Token: abc123_DEF-456\n";

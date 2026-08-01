@@ -61,11 +61,17 @@ import java.util.Map;
  * }
  * }</pre>
  *
- * <p>Register only the callbacks each flow reaches — each is an independent functional interface. v1
- * covers the password happy path (sign-in/sign-up → collect claims → code); enforced MFA and
- * email/SMS validation raise {@link UnsupportedFlowStepException}. The authorize/token endpoints are
- * discovered from {@code /.well-known/openid-configuration}, and the authorization code is captured
- * by the frontend's own {@code /callback} page.
+ * <p>Register only the callbacks each flow reaches — each is an independent functional interface. It
+ * covers the password happy path (sign-in/sign-up → collect claims → code), the confirm step, and TOTP
+ * MFA enrollment/challenge (see {@link #withMfaEnrollment()}); email/SMS claim validation raises
+ * {@link UnsupportedFlowStepException}. The authorize/token endpoints are discovered from
+ * {@code /.well-known/openid-configuration}, and the authorization code is captured by the frontend's
+ * own {@code /callback} page.
+ *
+ * <p>A flow that a server-initiated endpoint started (an admin- or client-initiated MFA enrollment)
+ * begins at a step link rather than {@code /authorize}: configure it with
+ * {@link InteractiveFlow#driveFrom(String, String, String)} and run it with
+ * {@link InteractiveFlow#drive()}, which reports whether it reached the success or cancel URL.
  */
 public final class InteractiveFlowRegistry implements AutoCloseable {
 
@@ -78,6 +84,10 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
 
     private String flowId = "default";
     private List<String> scopes = new ArrayList<>();
+
+    // When on, flowProperties() also declares the confirm + MFA page URLs, so a container with MFA
+    // enabled (which makes those flow keys mandatory) accepts this flow definition.
+    private boolean mfaEnrollmentEnabled;
 
     private final List<InteractiveFlow> flows = new ArrayList<>();
 
@@ -93,6 +103,11 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
     private volatile String capturedCode;
     private volatile String capturedState;
     private volatile RuntimeException failure;
+
+    // Per-run state for a link-driven flow (driveFrom/drive): the terminal reached and its query params.
+    private volatile FlowOutcome outcome;
+    private volatile String terminalUrl;
+    private volatile Map<String, String> terminalParams;
 
     private InteractiveFlowRegistry(Client client) {
         this.client = client;
@@ -125,6 +140,21 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
 
     public InteractiveFlowRegistry withScopes(String... scopes) {
         this.scopes = Arrays.asList(scopes);
+        return this;
+    }
+
+    /**
+     * Declares that this frontend serves the confirm and MFA-enrollment/challenge pages, so
+     * {@link #flowProperties()} additionally emits the {@code flows.<id>.confirm} and
+     * {@code mfa-*} page URLs. Enable this whenever the container has MFA turned on (see
+     * {@link com.sympauthy.testcontainers.SympauthyContainer#withMfa()}), since SympAuthy then
+     * <em>requires</em> the four MFA page keys and would otherwise drop the flow definition. Set it
+     * before {@link com.sympauthy.testcontainers.SympauthyContainer#withFlows(InteractiveFlowRegistry)}.
+     *
+     * @return this registry, for chaining
+     */
+    public InteractiveFlowRegistry withMfaEnrollment() {
+        this.mfaEnrollmentEnabled = true;
         return this;
     }
 
@@ -188,6 +218,15 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         properties.put(flow + "collect-claims", pageUrl("collect-claims"));
         properties.put(flow + "validate-claims", pageUrl("validate-claims"));
         properties.put(flow + "error", pageUrl("error"));
+        if (mfaEnrollmentEnabled) {
+            // SympAuthy requires all four MFA page keys once MFA is enabled; confirm stays optional but
+            // is served by the same frontend, so declare it too.
+            properties.put(flow + "confirm", pageUrl("confirm"));
+            properties.put(flow + "mfa-selection-for-enrollment", pageUrl("mfa-selection-for-enrollment"));
+            properties.put(flow + "mfa-selection-for-challenge", pageUrl("mfa-selection-for-challenge"));
+            properties.put(flow + "mfa-totp-enroll", pageUrl("mfa-totp-enroll"));
+            properties.put(flow + "mfa-totp-challenge", pageUrl("mfa-totp-challenge"));
+        }
         return properties;
     }
 
@@ -202,6 +241,10 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         if (baseUrl == null) {
             throw new IllegalStateException(
                     "Registry is not attached to a container; call SympauthyContainer.withFlows(registry) first");
+        }
+        if (flow.startUrl != null) {
+            throw new IllegalStateException(
+                    "This flow was configured with driveFrom(...); drive it with drive(), not run()");
         }
         active = flow;
         flow.steps.clear();
@@ -238,6 +281,56 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
                 tokenClient);
     }
 
+    /**
+     * Drives a {@link InteractiveFlow#driveFrom(String, String, String) link-driven} flow from its start
+     * link to a terminal. Skips {@code /authorize}/PKCE/token: the flow was already started by a
+     * server-initiated endpoint, so this only follows the browser from {@code startUrl} until it reaches
+     * the flow's success or cancel URL.
+     */
+    FlowResult drive(InteractiveFlow flow) {
+        if (baseUrl == null) {
+            throw new IllegalStateException(
+                    "Registry is not attached to a container; call SympauthyContainer.withFlows(registry) first");
+        }
+        if (flow.startUrl == null) {
+            throw new IllegalStateException("Call driveFrom(startUrl, successUrl, cancelUrl) before drive()");
+        }
+        requireInternal("start", flow.startUrl);
+        requireInternal("success", flow.successUrl);
+        requireInternal("cancel", flow.cancelUrl);
+
+        active = flow;
+        flow.steps.clear();
+        outcome = null;
+        terminalUrl = null;
+        terminalParams = null;
+        failure = null;
+
+        HttpClient apiClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+        this.api = new FlowApiClient(baseUrl, apiClient);
+
+        HttpClient browser = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
+        HttpResponse<String> response = send(browser,
+                HttpRequest.newBuilder(URI.create(flow.startUrl)).GET().build());
+
+        if (failure != null) {
+            throw failure;
+        }
+        if (outcome == null) {
+            throw new FlowException("Flow did not reach the success or cancel URL (ended at " + response.uri()
+                    + ", HTTP " + response.statusCode() + ")");
+        }
+        return new FlowResult(outcome, terminalUrl, terminalParams, flow.stepTypes());
+    }
+
+    /** Ensures a driveFrom URL belongs to this frontend, so the browser is actually served by it. */
+    private void requireInternal(String role, String url) {
+        if (url == null || !url.startsWith(frontendBaseUrl + "/")) {
+            throw new IllegalArgumentException("The " + role + " URL must be a page of this mock frontend ("
+                    + frontendBaseUrl + "); got: " + url);
+        }
+    }
+
     /** Stops the mock frontend server. */
     @Override
     public void close() {
@@ -252,10 +345,20 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         String state = queryParam(query, "state");
         String name = path.startsWith("/") ? path.substring(1) : path;
         try {
+            // A link-driven flow ends when the browser lands on its success or cancel URL, whatever the path.
+            InteractiveFlow current = active;
+            if (current != null && current.startUrl != null && captureTerminal(exchange, current, path, query)) {
+                return;
+            }
             switch (name) {
                 case "sign-in", "sign-up" -> respondRedirect(exchange, authenticatePage(state));
+                case "confirm" -> respondRedirect(exchange, confirmPage(state));
                 case "collect-claims" -> respondRedirect(exchange, collectClaimsPage(state));
                 case "validate-claims" -> respondRedirect(exchange, validateClaimsPage(state));
+                case "mfa-selection-for-enrollment" -> respondRedirect(exchange, mfaEnrollmentSelectionPage(state));
+                case "mfa-totp-enroll" -> respondRedirect(exchange, totpEnrollPage(state));
+                case "mfa-selection-for-challenge" -> respondRedirect(exchange, mfaChallengeSelectionPage(state));
+                case "mfa-totp-challenge" -> respondRedirect(exchange, totpChallengePage(state));
                 case "callback" -> {
                     capturedCode = queryParam(query, "code");
                     capturedState = queryParam(query, "state");
@@ -325,7 +428,115 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
                 "Flow requires claim validation, which the v1 driver does not automate");
     }
 
+    private String confirmPage(String state) {
+        FlowResponse response = api.getConfirm(state);
+        if (response.redirectUrl() != null) {
+            return response.redirectUrl(); // already confirmed: continue to the next step
+        }
+        ConfirmFlowResource resource = ConfirmFlowResource.fromMap(response.body());
+        emit(FlowStep.Type.CONFIRM, response.body());
+        if (active.confirmHandler == null) {
+            throw new UnsupportedFlowStepException("Flow reached the confirm page (action "
+                    + resource.action() + ") but no withConfirmHandler(...) was configured");
+        }
+        if (active.confirmHandler.decide(resource) == ConfirmDecision.CANCEL) {
+            emit(FlowStep.Type.CANCEL, Map.of());
+            return requireRedirect(api.cancel(state), "cancel");
+        }
+        return requireRedirect(api.confirm(state), "confirm");
+    }
+
+    private String mfaEnrollmentSelectionPage(String state) {
+        return mfaSelectionPage(api.getMfaEnrollment(state), "enrollment");
+    }
+
+    private String mfaChallengeSelectionPage(String state) {
+        return mfaSelectionPage(api.getMfaChallenge(state), "challenge");
+    }
+
+    private String mfaSelectionPage(FlowResponse response, String phase) {
+        if (response.redirectUrl() != null) {
+            return response.redirectUrl(); // not skippable: auto-redirect to the single method
+        }
+        Object skip = response.get("skip_redirect_url");
+        if (skip != null) {
+            return skip.toString(); // skippable (optional MFA during sign-up): skip by default
+        }
+        String totp = totpMethodRedirect(response.body());
+        if (totp == null) {
+            throw new UnsupportedFlowStepException("MFA " + phase
+                    + " offered no TOTP method the driver can handle: " + response.body());
+        }
+        return totp;
+    }
+
+    private String totpEnrollPage(String state) {
+        TotpEnrollData data = TotpEnrollData.fromMap(api.getTotpEnrollData(state).body());
+        emit(FlowStep.Type.MFA, data.raw());
+        String code = active.totpEnrollmentHandler != null
+                ? active.totpEnrollmentHandler.code(data)
+                : Totp.code(data.secret());
+        return requireRedirect(api.confirmTotpEnrollment(state, code), "totp-enroll");
+    }
+
+    private String totpChallengePage(String state) {
+        if (active.totpChallengeHandler == null) {
+            throw new UnsupportedFlowStepException(
+                    "Flow reached the TOTP challenge page but no withTotpChallengeHandler(...) was configured");
+        }
+        emit(FlowStep.Type.MFA, Map.of());
+        return requireRedirect(api.submitTotpChallenge(state, active.totpChallengeHandler.code()), "totp-challenge");
+    }
+
     // --- helpers ---
+
+    private boolean captureTerminal(HttpExchange exchange, InteractiveFlow flow, String path, String query)
+            throws IOException {
+        FlowOutcome reached;
+        if (path.equals(pathOf(flow.successUrl))) {
+            reached = FlowOutcome.SUCCESS;
+        } else if (path.equals(pathOf(flow.cancelUrl))) {
+            reached = FlowOutcome.CANCELED;
+        } else {
+            return false;
+        }
+        outcome = reached;
+        terminalUrl = query == null ? path : path + "?" + query;
+        terminalParams = queryParams(query);
+        respond(exchange, 200, "ok");
+        return true;
+    }
+
+    private static String totpMethodRedirect(Map<String, Object> body) {
+        if (body.get("methods") instanceof List<?> methods) {
+            for (Object element : methods) {
+                if (element instanceof Map<?, ?> method
+                        && "TOTP".equals(String.valueOf(method.get("method")))) {
+                    Object url = method.get("redirect_url");
+                    return url == null ? null : url.toString();
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String pathOf(String url) {
+        return URI.create(url).getPath();
+    }
+
+    private static Map<String, String> queryParams(String query) {
+        Map<String, String> params = new LinkedHashMap<>();
+        if (query == null) {
+            return params;
+        }
+        for (String pair : query.split("&")) {
+            int equals = pair.indexOf('=');
+            String key = equals < 0 ? pair : pair.substring(0, equals);
+            String value = equals < 0 ? "" : URLDecoder.decode(pair.substring(equals + 1), StandardCharsets.UTF_8);
+            params.put(URLDecoder.decode(key, StandardCharsets.UTF_8), value);
+        }
+        return params;
+    }
 
     private Map<String, Object> fetchDiscovery(HttpClient httpClient) {
         HttpResponse<String> response = send(httpClient, HttpRequest.newBuilder(URI.create(discoveryUrl))

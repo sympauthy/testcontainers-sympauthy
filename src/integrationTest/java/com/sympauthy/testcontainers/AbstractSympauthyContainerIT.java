@@ -85,4 +85,27 @@ public abstract class AbstractSympauthyContainerIT {
         }
         return HttpClient.newHttpClient().send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
+
+    /**
+     * Issues a JSON POST against any API path on the container, optionally bearing an access token. The
+     * POST sibling of {@link #apiGet(SympauthyContainer, String, String)} — used, for example, to call the
+     * admin/client MFA-enrollment entry points that start a server-initiated interactive flow.
+     *
+     * @param sympauthy   the running container
+     * @param path        the request path (e.g. {@code /api/v1/client/mfa/enrollment})
+     * @param accessToken the bearer access token, or {@code null} to send no Authorization header
+     * @param jsonBody    the JSON request body
+     * @return the HTTP response
+     */
+    protected static HttpResponse<String> apiPost(SympauthyContainer sympauthy, String path, String accessToken,
+            String jsonBody) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(sympauthy.getBaseUrl() + path))
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody));
+        if (accessToken != null) {
+            request.header("Authorization", "Bearer " + accessToken);
+        }
+        return HttpClient.newHttpClient().send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
 }
