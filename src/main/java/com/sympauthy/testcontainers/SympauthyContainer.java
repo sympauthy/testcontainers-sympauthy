@@ -289,6 +289,24 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
     }
 
     /**
+     * Enables TOTP multi-factor authentication ({@code mfa.totp.enabled = true}). Turning MFA on lets a
+     * flow reach the {@code CONFIRM} step and drive TOTP enrollment/challenge, and is required by the
+     * admin- and client-initiated MFA-enrollment entry points ({@code POST /api/v1/admin/users/{id}/mfa/enrollment},
+     * {@code POST /api/v1/client/mfa/enrollment}).
+     *
+     * <p>MFA is enabled but <em>optional</em> ({@code mfa.required = false}), so an ordinary sign-up can
+     * skip enrollment; it is enrolled on demand via the confirm-gated entry points above. SympAuthy
+     * <em>requires</em> the flow's MFA page URLs once MFA is on; {@link #withFlows(InteractiveFlowRegistry)}
+     * always declares them, so no extra flow setup is needed.
+     *
+     * @return this container, for chaining
+     */
+    public SympauthyContainer withMfa() {
+        return withProperty("mfa.required", "false")
+                .withProperty("mfa.totp.enabled", "true");
+    }
+
+    /**
      * Mounts a YAML or JSON configuration file into the container and adds it to
      * {@code MICRONAUT_CONFIG_FILES}. The file's extension is preserved so Micronaut infers the
      * format. Provide the file with {@link MountableFile#forClasspathResource(String)} or

@@ -27,8 +27,10 @@ com.sympauthy.testcontainers.client         HTTP clients for the APIs exposed by
                                             SympauthyApiException; usable standalone, no flow needed
 
 com.sympauthy.testcontainers.flow           drives SympAuthy's interactive login/authorization flow: the
-                                            mock frontend + container wiring, scripted runs, PKCE, and
-                                            per-page handlers (builds on the client package's FlowApiClient)
+                                            mock frontend + container wiring, scripted runs, PKCE, TOTP
+                                            (RFC 6238), the confirm step, and per-page handlers — plus
+                                            link-driven runs for admin/client-initiated flows (builds on
+                                            the client package's FlowApiClient)
 
 com.sympauthy.testcontainers.internal.json  internal utilities — the JsonCodec wrapper over the
                                             Shadow-relocated minimal-json parser
@@ -150,14 +152,17 @@ the same escape hatches — no new channel:
 endpoint to an authorization code (and tokens) without a browser.
 
 **`InteractiveFlowRegistry` is a mock of the flow *frontend*, not a client.** It runs a small
-`com.sun.net.httpserver.HttpServer` that plays the flow's pages (`/sign-in`, `/sign-up`,
-`/collect-claims`, `/validate-claims`, `/error`) plus the client's `/callback`. One registry hosts one
-`flows.<id>` definition and one client but any number of `InteractiveFlow`s — each a single scripted
-run (a sign-up, a sign-in, …) minted with `registry.newFlow()`; the registry serves whichever flow's
-`run()` is currently executing. SympAuthy owns the orchestration — it decides, via the `redirect_url`
-each Flow API call returns, which page comes next — while each mock page just calls the running flow's
-callback and submits to the Flow API. A redirect-**following** HTTP client ("browser") rides
-SympAuthy's 303s across the pages until `/callback` captures the code.
+`com.sun.net.httpserver.HttpServer` that plays the flow's pages (`/sign-in`, `/sign-up`, `/confirm`,
+`/collect-claims`, `/validate-claims`, the MFA pages `/mfa-selection-for-enrollment`,
+`/mfa-totp-enroll`, `/mfa-selection-for-challenge`, `/mfa-totp-challenge`, `/error`) plus the client's
+`/callback`. One registry hosts one `flows.<id>` definition and one client but any number of
+`InteractiveFlow`s — each a single scripted run (a sign-up, a sign-in, …) minted with
+`registry.newFlow()`; the registry serves whichever flow's `run()` (or `drive()`) is currently
+executing. SympAuthy owns the orchestration — it decides, via the `redirect_url` each Flow API call
+returns, which page comes next — while each mock page just calls the running flow's callback and
+submits to the Flow API. A redirect-**following** HTTP client ("browser") rides SympAuthy's 303s across
+the pages until `/callback` captures the code (or, for a link-driven flow, until the success/cancel URL
+is reached).
 
 Lifecycle (the flow's page URLs must be in SympAuthy's startup config, so the server binds first):
 `InteractiveFlowRegistry.forClient(id)` (binds a local port) → `registry.newFlow().with*Handler(...)`
@@ -205,9 +210,24 @@ Key points when extending:
   *before* notifying the listener, and `InteractiveFlow.stepTypes()` exposes the `List<FlowStep.Type>`
   traversed. That is the boilerplate-free way to assert on the path taken; `StepListener` stays for
   reacting to a step as it happens (reading its `data()`, calling the Flow API mid-flow).
-- **v1 covers the password happy path** (sign-in/sign-up → collect claims → code). The
-  `/validate-claims` page throws `UnsupportedFlowStepException` (the seam for a future validation
-  tier); MFA is not modelled.
+- **Covers the password happy path** (sign-in/sign-up → collect claims → code), the **confirm step**,
+  and **TOTP MFA enrollment/challenge**. The `/validate-claims` page throws
+  `UnsupportedFlowStepException` (the seam for a future email/SMS-validation tier). `flowProperties()`
+  **always** emits `flows.<id>.confirm` and the four `mfa-*` page URLs (the frontend serves them;
+  `confirm` is optional server-side and the `mfa-*` keys are mandatory once MFA is on, harmless when
+  off), so no per-registry opt-in is needed — just `SympauthyContainer.withMfa()` (`mfa.required=false`
+  + `mfa.totp.enabled=true`) on the container. A `ConfirmHandler` returns a `ConfirmDecision`
+  (`CONFIRM` → `POST /flow/confirm`, `CANCEL` → `POST /flow/cancel`); TOTP is auto-driven (secret →
+  code) via the dependency-free `Totp` (RFC 6238, HMAC-SHA1/6/30, Base32), with optional
+  `TotpEnrollmentHandler`/`TotpChallengeHandler` seams.
+- **Link-driven runs for server-initiated flows.** Admin-/client-initiated MFA enrollments start at a
+  server-returned step link, not `/authorize`. The module stays out of the initiation auth: the test
+  calls the entry point itself (`POST /api/v1/{admin/users/{id},client}/mfa/enrollment`), then hands the
+  flow `InteractiveFlow.driveFrom(startUrl, successUrl, cancelUrl)` (all three verified to belong to the
+  mock frontend) and calls `drive()`, which returns a `FlowResult`/`FlowOutcome` (`SUCCESS`/`CANCELED`).
+  A server-initiated flow resolves its pages from the **default client template's** `authorization-flow`
+  (`templates.clients.default.authorization-flow`), so point that at the registry's flow. `run()`
+  (`/authorize` path, returns `AuthorizationResult`) is unchanged.
 - **PKCE `S256` is always sent.** The registry is constructed from a **`Client`** (root package: id +
   optional secret + public/confidential, with `authenticate(form, request)`) via `forClient(Client)`:
   pass `Client.publicClient(id)` for a **public** client (PKCE only), or

@@ -27,8 +27,11 @@ public final class InteractiveFlow {
     // Read by the registry's server threads while this flow is the one being run.
     SignInHandler signInHandler;
     SignUpHandler signUpHandler;
+    ConfirmHandler confirmHandler;
     ClaimsHandler claimsHandler;
     ValidationCodeHandler validationCodeHandler;
+    TotpEnrollmentHandler totpEnrollmentHandler;
+    TotpChallengeHandler totpChallengeHandler;
     StepListener stepListener;
 
     // When set, sent as the invitation_token query parameter on the authorize request that starts this
@@ -38,6 +41,12 @@ public final class InteractiveFlow {
     // When set, sent as the nonce query parameter on the authorize request that starts this run; the
     // issued id_token must echo it back unchanged (OpenID Connect Core replay mitigation).
     String nonce;
+
+    // Set by driveFrom(...) for a link-driven run: the server-returned step link to start from, and the
+    // success/cancel URLs to recognize as terminals. All must belong to the mock frontend.
+    String startUrl;
+    String successUrl;
+    String cancelUrl;
 
     // Steps traversed during run(), appended by the registry's emit() on the server threads and read
     // back on the run()/test thread — hence a thread-safe list.
@@ -57,6 +66,12 @@ public final class InteractiveFlow {
         return this;
     }
 
+    /** Decides whether to approve or cancel the action at a {@link FlowStep.Type#CONFIRM confirm} step. */
+    public InteractiveFlow withConfirmHandler(ConfirmHandler handler) {
+        this.confirmHandler = handler;
+        return this;
+    }
+
     public InteractiveFlow withClaimsHandler(ClaimsHandler handler) {
         this.claimsHandler = handler;
         return this;
@@ -64,6 +79,22 @@ public final class InteractiveFlow {
 
     public InteractiveFlow withValidationCodeHandler(ValidationCodeHandler handler) {
         this.validationCodeHandler = handler;
+        return this;
+    }
+
+    /**
+     * Observes (or overrides) the code used to confirm TOTP enrollment. By default the flow computes a
+     * valid code from the secret automatically; set this to capture the secret (e.g. for a later
+     * challenge) or to submit a wrong code.
+     */
+    public InteractiveFlow withTotpEnrollmentHandler(TotpEnrollmentHandler handler) {
+        this.totpEnrollmentHandler = handler;
+        return this;
+    }
+
+    /** Supplies the code that answers a TOTP challenge during sign-in of an already-enrolled user. */
+    public InteractiveFlow withTotpChallengeHandler(TotpChallengeHandler handler) {
+        this.totpChallengeHandler = handler;
         return this;
     }
 
@@ -106,6 +137,37 @@ public final class InteractiveFlow {
     /** Drives this flow to the client callback and returns the captured authorization code. */
     public AuthorizationResult run() {
         return registry.run(this);
+    }
+
+    /**
+     * Configures a <em>link-driven</em> run: instead of starting at {@code /authorize}, this flow starts
+     * at {@code startUrl} — a step link a server-initiated flow handed back (e.g. the {@code redirect_url}
+     * from an admin- or client-initiated MFA enrollment) — and ends when it reaches {@code successUrl} or
+     * {@code cancelUrl}. Drive it with {@link #drive()}, which returns a {@link FlowResult} reporting which
+     * terminal was reached.
+     *
+     * <p>All three URLs must belong to this registry's mock frontend (they are verified against its
+     * internal base URL); {@code successUrl}/{@code cancelUrl} are the {@code return_uri}/{@code cancel_uri}
+     * you supplied to the initiating endpoint and registered as the client's redirect URIs.
+     *
+     * @param startUrl   the step link to start the browser at
+     * @param successUrl the URL that marks a successful completion
+     * @param cancelUrl  the URL that marks a cancellation
+     * @return this flow, for chaining
+     */
+    public InteractiveFlow driveFrom(String startUrl, String successUrl, String cancelUrl) {
+        this.startUrl = startUrl;
+        this.successUrl = successUrl;
+        this.cancelUrl = cancelUrl;
+        return this;
+    }
+
+    /**
+     * Drives a {@link #driveFrom(String, String, String) link-driven} flow from its start link to a
+     * terminal and returns the {@link FlowResult} (SUCCESS or CANCELED). Call {@link #driveFrom} first.
+     */
+    public FlowResult drive() {
+        return registry.drive(this);
     }
 
     /**

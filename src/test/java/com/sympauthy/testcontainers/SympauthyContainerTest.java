@@ -243,6 +243,32 @@ class SympauthyContainerTest {
     }
 
     @Test
+    void withMfaEnablesOptionalTotp() {
+        SympauthyContainer container = new SympauthyContainer().withMfa();
+
+        List<String> command = commandOf(container);
+        assertTrue(command.contains("-mfa.totp.enabled=true"), command.toString());
+        assertTrue(command.contains("-mfa.required=false"), command.toString());
+    }
+
+    @Test
+    void withFlowsAlwaysDeclaresTheConfirmAndMfaPageKeys() {
+        try (InteractiveFlowRegistry registry =
+                        InteractiveFlowRegistry.forClient(Client.publicClient("app")).withFlowId("f")) {
+
+            // The frontend serves them and SympAuthy requires the four MFA keys once MFA is on, so withFlows
+            // always declares the confirm + MFA page URLs (harmless when MFA is off).
+            List<String> command = commandOf(new SympauthyContainer().withFlows(registry));
+            for (String key : List.of("confirm", "mfa-selection-for-enrollment", "mfa-selection-for-challenge",
+                    "mfa-totp-enroll", "mfa-totp-challenge")) {
+                assertTrue(
+                        command.stream().anyMatch(part -> part.startsWith("-flows.f." + key + "=http://localhost:")),
+                        "expected a flows.f." + key + " page URL in: " + command);
+            }
+        }
+    }
+
+    @Test
     void parsesTheRawTokenLogForm() {
         String logs = "12:00:00 INFO  BootstrapInvitationManager - Bootstrap invitation 'custom' "
                 + "created for audience 'app'. Token: abc123_DEF-456\n";

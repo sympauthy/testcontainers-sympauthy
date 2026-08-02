@@ -58,8 +58,44 @@ public final class FlowApiClient {
         return post("/api/v1/flow/claims", state, values);
     }
 
-    public FlowResponse getMfa(String state) {
-        return get("/api/v1/flow/mfa", state);
+    /** {@code GET /api/v1/flow/confirm}: the action a client/admin asked the user to confirm. */
+    public FlowResponse getConfirm(String state) {
+        return get("/api/v1/flow/confirm", state);
+    }
+
+    /** {@code POST /api/v1/flow/confirm} (bodyless): approves the pending action. */
+    public FlowResponse confirm(String state) {
+        return post("/api/v1/flow/confirm", state);
+    }
+
+    /** {@code POST /api/v1/flow/cancel} (bodyless): cancels the flow. */
+    public FlowResponse cancel(String state) {
+        return post("/api/v1/flow/cancel", state);
+    }
+
+    /** {@code GET /api/v1/flow/mfa/enrollment}: the enrollable MFA methods (or an auto-redirect to one). */
+    public FlowResponse getMfaEnrollment(String state) {
+        return get("/api/v1/flow/mfa/enrollment", state);
+    }
+
+    /** {@code GET /api/v1/flow/mfa/totp/enroll}: the TOTP shared secret to enroll ({@code {uri, secret}}). */
+    public FlowResponse getTotpEnrollData(String state) {
+        return get("/api/v1/flow/mfa/totp/enroll", state);
+    }
+
+    /** {@code POST /api/v1/flow/mfa/totp/enroll}: confirms enrollment with a code generated from the secret. */
+    public FlowResponse confirmTotpEnrollment(String state, String code) {
+        return post("/api/v1/flow/mfa/totp/enroll", state, Map.of("code", code));
+    }
+
+    /** {@code GET /api/v1/flow/mfa/challenge}: the MFA methods to challenge (or an auto-redirect to one). */
+    public FlowResponse getMfaChallenge(String state) {
+        return get("/api/v1/flow/mfa/challenge", state);
+    }
+
+    /** {@code POST /api/v1/flow/mfa/totp}: answers the TOTP challenge with a generated code. */
+    public FlowResponse submitTotpChallenge(String state, String code) {
+        return post("/api/v1/flow/mfa/totp", state, Map.of("code", code));
     }
 
     public FlowResponse getValidation(String state, String media) {
@@ -86,6 +122,16 @@ public final class FlowApiClient {
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(JsonCodec.write(body)))
+                .build();
+        return send(request);
+    }
+
+    /** A bodyless POST carrying only the flow state, for endpoints that take no request body. */
+    private FlowResponse post(String path, String state) {
+        HttpRequest request = HttpRequest.newBuilder(resolve(path))
+                .header("Authorization", "State " + state)
+                .header("Accept", "application/json")
+                .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         return send(request);
     }

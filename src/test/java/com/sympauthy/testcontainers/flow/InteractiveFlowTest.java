@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,6 +26,8 @@ class InteractiveFlowTest {
 
     private static final String FLOW_STATE = "flow-state-jwt";
     private static final String CODE = "auth-code-123";
+    /** RFC 6238 Appendix B ASCII seed, Base32-encoded — a stub TOTP enrollment secret. */
+    private static final String SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
     /** A password {@code identifier_claims} entry in the post-#283 full-object shape. */
     private static final String IDENTIFIER_CLAIM =
             "{\"id\":\"email\",\"required\":true,\"name\":\"Email\",\"type\":\"string\",\"group\":null}";
@@ -238,6 +241,104 @@ class InteractiveFlowTest {
         try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
             InteractiveFlow flow = registry.newFlow().withSignUpHandler(configuration -> Map.of());
             assertThrows(IllegalStateException.class, flow::run);
+        }
+    }
+
+    @Test
+    void drivesConfirmApproveThroughTotpEnrollmentToSuccess() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app"))) {
+            String successUrl = registry.frontendUrl() + "/mfa-return";
+            String cancelUrl = registry.frontendUrl() + "/mfa-cancel";
+            String startUrl = registry.frontendUrl() + "/confirm?state=" + FLOW_STATE;
+
+            AtomicReference<ConfirmFlowResource> seen = new AtomicReference<>();
+            AtomicReference<String> submittedCode = new AtomicReference<>();
+            InteractiveFlow flow = registry.newFlow()
+                    .withConfirmHandler(resource -> {
+                        seen.set(resource);
+                        return ConfirmDecision.CONFIRM;
+                    })
+                    .withTotpEnrollmentHandler(data -> {
+                        String code = Totp.code(data.secret());
+                        submittedCode.set(code);
+                        return code;
+                    })
+                    .driveFrom(startUrl, successUrl, cancelUrl);
+
+            // The server-orchestrated enrollment: confirm → mfa selection (auto) → totp enroll → return.
+            sympauthy.route("GET", "/api/v1/flow/confirm", request -> TestFlowServer.Response.json(200,
+                    "{\"action\":\"ENROLL_MFA\",\"initiating_client_id\":\"test-app\"}"));
+            sympauthy.route("POST", "/api/v1/flow/confirm", request -> TestFlowServer.Response.json(200,
+                    redirectTo(registry.frontendUrl() + "/mfa-selection-for-enrollment?state=" + FLOW_STATE)));
+            sympauthy.route("GET", "/api/v1/flow/mfa/enrollment", request -> TestFlowServer.Response.json(200,
+                    redirectTo(registry.frontendUrl() + "/mfa-totp-enroll?state=" + FLOW_STATE)));
+            sympauthy.route("GET", "/api/v1/flow/mfa/totp/enroll", request -> TestFlowServer.Response.json(200,
+                    "{\"uri\":\"otpauth://totp/x?secret=" + SECRET + "\",\"secret\":\"" + SECRET + "\"}"));
+            sympauthy.route("POST", "/api/v1/flow/mfa/totp/enroll", request ->
+                    TestFlowServer.Response.json(200, redirectTo(successUrl)));
+            attach(registry, sympauthy);
+
+            FlowResult result = flow.drive();
+
+            assertTrue(result.isSuccess());
+            assertEquals(FlowOutcome.SUCCESS, result.outcome());
+            assertEquals(List.of(FlowStep.Type.CONFIRM, FlowStep.Type.MFA), flow.stepTypes());
+            assertEquals("ENROLL_MFA", seen.get().action());
+            assertEquals("test-app", seen.get().initiatingClientId());
+            // State transport: GET carries ?state=, the bodyless confirm POST carries Authorization: State.
+            assertEquals(FLOW_STATE, sympauthy.firstRequest("GET", "/api/v1/flow/confirm").stateQueryParam());
+            TestFlowServer.RecordedRequest confirmPost = sympauthy.firstRequest("POST", "/api/v1/flow/confirm");
+            assertEquals("State " + FLOW_STATE, confirmPost.headers().get("Authorization"));
+            assertEquals("", confirmPost.body());
+            // The code generated from the enrollment secret was submitted to the enroll endpoint.
+            assertTrue(sympauthy.firstRequest("POST", "/api/v1/flow/mfa/totp/enroll").body()
+                    .contains("\"code\":\"" + submittedCode.get() + "\""), submittedCode.get());
+        }
+    }
+
+    @Test
+    void drivesConfirmDenyToCancel() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app"))) {
+            String successUrl = registry.frontendUrl() + "/mfa-return";
+            String cancelUrl = registry.frontendUrl() + "/mfa-cancel";
+            String startUrl = registry.frontendUrl() + "/confirm?state=" + FLOW_STATE;
+
+            InteractiveFlow flow = registry.newFlow()
+                    .withConfirmHandler(resource -> ConfirmDecision.CANCEL)
+                    .driveFrom(startUrl, successUrl, cancelUrl);
+
+            sympauthy.route("GET", "/api/v1/flow/confirm", request -> TestFlowServer.Response.json(200,
+                    "{\"action\":\"ENROLL_MFA\"}"));
+            sympauthy.route("POST", "/api/v1/flow/cancel", request -> TestFlowServer.Response.json(200,
+                    redirectTo(cancelUrl + "?error=access_denied")));
+            attach(registry, sympauthy);
+
+            FlowResult result = flow.drive();
+
+            assertTrue(result.isCanceled());
+            assertEquals(FlowOutcome.CANCELED, result.outcome());
+            assertEquals(List.of(FlowStep.Type.CONFIRM, FlowStep.Type.CANCEL), flow.stepTypes());
+            assertEquals("access_denied", result.terminalParam("error"));
+            // The cancel POST is bodyless and carries the state in the Authorization header.
+            TestFlowServer.RecordedRequest cancelPost = sympauthy.firstRequest("POST", "/api/v1/flow/cancel");
+            assertEquals("State " + FLOW_STATE, cancelPost.headers().get("Authorization"));
+            assertEquals("", cancelPost.body());
+        }
+    }
+
+    @Test
+    void rejectsDriveUrlsOutsideTheFrontend() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app"))) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withConfirmHandler(resource -> ConfirmDecision.CONFIRM)
+                    .driveFrom(registry.frontendUrl() + "/confirm?state=x",
+                            "https://evil.example.com/return", registry.frontendUrl() + "/mfa-cancel");
+            attach(registry, sympauthy);
+
+            assertThrows(IllegalArgumentException.class, flow::drive);
         }
     }
 
