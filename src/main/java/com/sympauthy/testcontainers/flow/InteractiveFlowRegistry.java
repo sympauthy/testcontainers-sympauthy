@@ -63,7 +63,7 @@ import java.util.Map;
  *
  * <p>Register only the callbacks each flow reaches — each is an independent functional interface. It
  * covers the password happy path (sign-in/sign-up → collect claims → code), the confirm step, and TOTP
- * MFA enrollment/challenge (see {@link #withMfaEnrollment()}); email/SMS claim validation raises
+ * MFA enrollment/challenge; email/SMS claim validation raises
  * {@link UnsupportedFlowStepException}. The authorize/token endpoints are discovered from
  * {@code /.well-known/openid-configuration}, and the authorization code is captured by the frontend's
  * own {@code /callback} page.
@@ -84,10 +84,6 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
 
     private String flowId = "default";
     private List<String> scopes = new ArrayList<>();
-
-    // When on, flowProperties() also declares the confirm + MFA page URLs, so a container with MFA
-    // enabled (which makes those flow keys mandatory) accepts this flow definition.
-    private boolean mfaEnrollmentEnabled;
 
     private final List<InteractiveFlow> flows = new ArrayList<>();
 
@@ -140,21 +136,6 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
 
     public InteractiveFlowRegistry withScopes(String... scopes) {
         this.scopes = Arrays.asList(scopes);
-        return this;
-    }
-
-    /**
-     * Declares that this frontend serves the confirm and MFA-enrollment/challenge pages, so
-     * {@link #flowProperties()} additionally emits the {@code flows.<id>.confirm} and
-     * {@code mfa-*} page URLs. Enable this whenever the container has MFA turned on (see
-     * {@link com.sympauthy.testcontainers.SympauthyContainer#withMfa()}), since SympAuthy then
-     * <em>requires</em> the four MFA page keys and would otherwise drop the flow definition. Set it
-     * before {@link com.sympauthy.testcontainers.SympauthyContainer#withFlows(InteractiveFlowRegistry)}.
-     *
-     * @return this registry, for chaining
-     */
-    public InteractiveFlowRegistry withMfaEnrollment() {
-        this.mfaEnrollmentEnabled = true;
         return this;
     }
 
@@ -218,15 +199,14 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         properties.put(flow + "collect-claims", pageUrl("collect-claims"));
         properties.put(flow + "validate-claims", pageUrl("validate-claims"));
         properties.put(flow + "error", pageUrl("error"));
-        if (mfaEnrollmentEnabled) {
-            // SympAuthy requires all four MFA page keys once MFA is enabled; confirm stays optional but
-            // is served by the same frontend, so declare it too.
-            properties.put(flow + "confirm", pageUrl("confirm"));
-            properties.put(flow + "mfa-selection-for-enrollment", pageUrl("mfa-selection-for-enrollment"));
-            properties.put(flow + "mfa-selection-for-challenge", pageUrl("mfa-selection-for-challenge"));
-            properties.put(flow + "mfa-totp-enroll", pageUrl("mfa-totp-enroll"));
-            properties.put(flow + "mfa-totp-challenge", pageUrl("mfa-totp-challenge"));
-        }
+        // The frontend serves the confirm and MFA pages too, so always declare them: confirm is optional
+        // server-side, and the four MFA keys are mandatory once MFA is enabled and harmless (unused) when
+        // it is not.
+        properties.put(flow + "confirm", pageUrl("confirm"));
+        properties.put(flow + "mfa-selection-for-enrollment", pageUrl("mfa-selection-for-enrollment"));
+        properties.put(flow + "mfa-selection-for-challenge", pageUrl("mfa-selection-for-challenge"));
+        properties.put(flow + "mfa-totp-enroll", pageUrl("mfa-totp-enroll"));
+        properties.put(flow + "mfa-totp-challenge", pageUrl("mfa-totp-challenge"));
         return properties;
     }
 

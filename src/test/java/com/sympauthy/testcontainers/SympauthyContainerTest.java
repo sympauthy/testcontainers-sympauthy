@@ -252,28 +252,18 @@ class SympauthyContainerTest {
     }
 
     @Test
-    void withFlowsEmitsMfaPageKeysOnlyWhenEnrollmentIsEnabled() {
-        try (InteractiveFlowRegistry plain =
-                        InteractiveFlowRegistry.forClient(Client.publicClient("app")).withFlowId("f");
-                InteractiveFlowRegistry mfa =
-                        InteractiveFlowRegistry.forClient(Client.publicClient("app")).withFlowId("f").withMfaEnrollment()) {
+    void withFlowsAlwaysDeclaresTheConfirmAndMfaPageKeys() {
+        try (InteractiveFlowRegistry registry =
+                        InteractiveFlowRegistry.forClient(Client.publicClient("app")).withFlowId("f")) {
 
-            // Without withMfaEnrollment, the flow definition is just the password-flow page keys.
-            List<String> withoutMfa = commandOf(new SympauthyContainer().withFlows(plain));
-            assertFalse(
-                    withoutMfa.stream().anyMatch(part -> part.startsWith("-flows.f.confirm=")),
-                    withoutMfa.toString());
-            assertFalse(
-                    withoutMfa.stream().anyMatch(part -> part.startsWith("-flows.f.mfa-totp-enroll=")),
-                    withoutMfa.toString());
-
-            // With it, the confirm + all four MFA page keys (required once MFA is enabled) are declared.
-            List<String> withMfa = commandOf(new SympauthyContainer().withFlows(mfa));
+            // The frontend serves them and SympAuthy requires the four MFA keys once MFA is on, so withFlows
+            // always declares the confirm + MFA page URLs (harmless when MFA is off).
+            List<String> command = commandOf(new SympauthyContainer().withFlows(registry));
             for (String key : List.of("confirm", "mfa-selection-for-enrollment", "mfa-selection-for-challenge",
                     "mfa-totp-enroll", "mfa-totp-challenge")) {
                 assertTrue(
-                        withMfa.stream().anyMatch(part -> part.startsWith("-flows.f." + key + "=http://localhost:")),
-                        "expected a flows.f." + key + " page URL in: " + withMfa);
+                        command.stream().anyMatch(part -> part.startsWith("-flows.f." + key + "=http://localhost:")),
+                        "expected a flows.f." + key + " page URL in: " + command);
             }
         }
     }

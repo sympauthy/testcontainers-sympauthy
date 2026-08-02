@@ -212,10 +212,11 @@ Key points when extending:
   reacting to a step as it happens (reading its `data()`, calling the Flow API mid-flow).
 - **Covers the password happy path** (sign-in/sign-up → collect claims → code), the **confirm step**,
   and **TOTP MFA enrollment/challenge**. The `/validate-claims` page throws
-  `UnsupportedFlowStepException` (the seam for a future email/SMS-validation tier). Confirm/MFA are
-  opt-in: `registry.withMfaEnrollment()` makes `flowProperties()` also emit `flows.<id>.confirm` and the
-  four (server-mandatory once MFA is on) `mfa-*` page URLs, and `SympauthyContainer.withMfa()` sets
-  `mfa.required=false` + `mfa.totp.enabled=true`. A `ConfirmHandler` returns a `ConfirmDecision`
+  `UnsupportedFlowStepException` (the seam for a future email/SMS-validation tier). `flowProperties()`
+  **always** emits `flows.<id>.confirm` and the four `mfa-*` page URLs (the frontend serves them;
+  `confirm` is optional server-side and the `mfa-*` keys are mandatory once MFA is on, harmless when
+  off), so no per-registry opt-in is needed — just `SympauthyContainer.withMfa()` (`mfa.required=false`
+  + `mfa.totp.enabled=true`) on the container. A `ConfirmHandler` returns a `ConfirmDecision`
   (`CONFIRM` → `POST /flow/confirm`, `CANCEL` → `POST /flow/cancel`); TOTP is auto-driven (secret →
   code) via the dependency-free `Totp` (RFC 6238, HMAC-SHA1/6/30, Base32), with optional
   `TotpEnrollmentHandler`/`TotpChallengeHandler` seams.

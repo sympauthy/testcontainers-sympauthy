@@ -295,10 +295,9 @@ public class SympauthyContainer extends GenericContainer<SympauthyContainer> {
      * {@code POST /api/v1/client/mfa/enrollment}).
      *
      * <p>MFA is enabled but <em>optional</em> ({@code mfa.required = false}), so an ordinary sign-up can
-     * skip enrollment; it is enrolled on demand via the confirm-gated entry points above. SympAuthy then
-     * <em>requires</em> the flow's MFA page URLs, so pair this with an {@link InteractiveFlowRegistry} that
-     * {@link InteractiveFlowRegistry#withMfaEnrollment() serves them} before
-     * {@link #withFlows(InteractiveFlowRegistry)}.
+     * skip enrollment; it is enrolled on demand via the confirm-gated entry points above. SympAuthy
+     * <em>requires</em> the flow's MFA page URLs once MFA is on; {@link #withFlows(InteractiveFlowRegistry)}
+     * always declares them, so no extra flow setup is needed.
      *
      * @return this container, for chaining
      */

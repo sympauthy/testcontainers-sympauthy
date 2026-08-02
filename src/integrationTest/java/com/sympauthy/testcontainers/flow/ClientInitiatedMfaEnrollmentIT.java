@@ -48,8 +48,7 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
     void startContainer() throws Exception {
         registry = InteractiveFlowRegistry
                 .forClient(Client.confidentialClient(CLIENT_ID, CLIENT_SECRET))
-                .withScopes("openid")
-                .withMfaEnrollment();
+                .withScopes("openid");
         sympauthy = newContainer()
                 .withMfa()
                 .withConfig(config(registry))

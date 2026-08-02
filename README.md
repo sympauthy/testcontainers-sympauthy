@@ -282,9 +282,9 @@ Map<String, Object> clientConfig = Map.of(
 
 MFA applies to any flow, not only [client- or admin-initiated](#client--or-admin-initiated-interactive-flows)
 ones — an already-enrolled user must answer a **TOTP challenge** on a normal sign-in. Enable MFA on the
-container with `withMfa()` (optional TOTP: `mfa.required=false`, `mfa.totp.enabled=true`) and have the
-mock frontend serve the confirm/MFA pages with `registry.withMfaEnrollment()` (SympAuthy *requires* those
-flow pages once MFA is on). Three more per-flow callbacks then drive the confirm and MFA steps:
+container with `withMfa()` (optional TOTP: `mfa.required=false`, `mfa.totp.enabled=true`); `withFlows`
+already declares the confirm/MFA flow pages the mock frontend serves, so no extra registry setup is
+needed. Three more per-flow callbacks then drive the confirm and MFA steps:
 
 | Callback | Purpose |
 | -------------------------------------------------- | ------------------------------------------------------------------ |
@@ -385,12 +385,12 @@ plus the success/cancel URLs you passed to `driveFrom(startUrl, successUrl, canc
 Driving the interactive flow](#multi-factor-authentication-totp) — to a terminal and returns a
 `FlowResult`: `SUCCESS` if it reached the success URL, `CANCELED` if it reached the cancel URL.
 
-Build the registry with `withMfaEnrollment()` and the container with `withMfa()` (today's action enrols
-MFA, so the frontend must serve the confirm/MFA pages), then call the entry point and drive the link:
+Enable MFA on the container with `withMfa()` (today's action enrols MFA), then call the entry point and
+drive the link:
 
 ```java
 InteractiveFlowRegistry registry = InteractiveFlowRegistry
-    .forClient(Client.confidentialClient("mfa-app", "s3cr3t")).withScopes("openid").withMfaEnrollment();
+    .forClient(Client.confidentialClient("mfa-app", "s3cr3t")).withScopes("openid");
 
 String successUrl = registry.frontendUrl() + "/mfa-return";   // the return_uri you pass the API
 String cancelUrl  = registry.frontendUrl() + "/mfa-cancel";   // the cancel_uri you pass the API
