@@ -41,6 +41,10 @@ class SignUpWithInteractiveFlowIT extends AbstractSympauthyContainerIT {
                         "authorizationFlow", registry.flowId(),
                         "allowed-grant-types", List.of("authorization_code"),
                         "allowed-scopes", List.of("openid"),
+                        // Pin the default scopes too: a client inherits them from
+                        // templates.clients.default.default-scopes otherwise, and the server refuses a
+                        // default scope that allowed-scopes does not allow (/authorize then 500s).
+                        "default-scopes", List.of("openid"),
                         "allowed-redirect-uris", List.of(registry.redirectUri()))));
     }
 
