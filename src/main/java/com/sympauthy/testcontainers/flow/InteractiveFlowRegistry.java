@@ -25,6 +25,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * A mock of SympAuthy's interactive-flow <em>frontend</em>: a small HTTP server that stands in for the
@@ -76,6 +77,16 @@ import java.util.Map;
 public final class InteractiveFlowRegistry implements AutoCloseable {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    /**
+     * The authorization-request parameters {@link #authorizeParams} computes itself — keep the two in sync.
+     * They are what let the {@link AuthorizationResult} of a {@link InteractiveFlow#run() run} exchange its
+     * code afterwards, so {@link InteractiveFlow#withAuthorizationParam(String, String)} refuses them
+     * instead of letting an extra parameter produce a request this registry cannot drive.
+     */
+    static final Set<String> RESERVED_AUTHORIZATION_PARAMS = Set.of(
+            "response_type", "client_id", "redirect_uri", "scope", "state",
+            "code_challenge", "code_challenge_method");
 
     // The client these flows authenticate as — public (PKCE only) or confidential (sends a secret).
     private final Client client;
@@ -542,6 +553,10 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         if (active.nonce != null) {
             params.put("nonce", active.nonce);
         }
+        // Caller-supplied extras last, so they win over the two parameters that also have a named setter.
+        // The reserved ones above are refused at withAuthorizationParam(...), so nothing here can break
+        // the request this run must be able to exchange afterwards.
+        params.putAll(active.authorizationParams);
         return params;
     }
 

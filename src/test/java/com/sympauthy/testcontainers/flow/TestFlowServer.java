@@ -101,8 +101,10 @@ final class TestFlowServer implements AutoCloseable {
             }
         });
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        // The query is recorded raw (percent-encoded), so a test can assert on what actually went over
+        // the wire; queryParam(...) decodes a single value back.
         RecordedRequest request = new RecordedRequest(
-                exchange.getRequestMethod(), uri.getPath(), uri.getQuery(), headers, body);
+                exchange.getRequestMethod(), uri.getPath(), uri.getRawQuery(), headers, body);
         requests.add(request);
 
         Responder responder = routes.get(request.method() + " " + request.path());

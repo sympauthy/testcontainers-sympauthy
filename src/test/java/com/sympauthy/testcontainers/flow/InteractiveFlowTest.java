@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -191,6 +192,79 @@ class InteractiveFlowTest {
     }
 
     @Test
+    void sendsArbitraryAuthorizationParamsOnAuthorize() {
+        // The escape hatch for /authorize parameters the module does not model — here the OpenID Connect
+        // Core §5.5 claims request, whose JSON value needs url-encoding to survive the query string.
+        String claims = "{\"id_token\":{\"loyalty_tier\":null},\"userinfo\":{\"email\":{\"essential\":true}}}";
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withAuthorizationParam("claims", claims)
+                    .withAuthorizationParam("prompt", "login consent")
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
+
+            registerSympAuthy(sympauthy, registry);
+            sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
+            attach(registry, sympauthy);
+
+            AuthorizationResult result = flow.run();
+
+            // Both extras ride the authorize request and arrive intact: a JSON object and a
+            // space-separated list, encoded on the wire and decoded back to what was set.
+            TestFlowServer.RecordedRequest authorize = sympauthy.firstRequest("GET", "/api/oauth2/authorize");
+            assertEquals(claims, TestFlowServer.RecordedRequest.queryParam(authorize.query(), "claims"));
+            assertEquals("login consent",
+                    TestFlowServer.RecordedRequest.queryParam(authorize.query(), "prompt"));
+            assertFalse(authorize.query().contains(claims), authorize.query());
+
+            // The run stays an ordinary run(): the driver kept the PKCE pair, so the result exchanges.
+            assertEquals(CODE, result.code());
+            assertEquals("at", result.exchange().accessToken());
+            assertTrue(sympauthy.firstRequest("POST", "/api/oauth2/token").body().contains("code_verifier="));
+        }
+    }
+
+    @Test
+    void sendsOnlyTheDriverComputedParamsOnAuthorizeByDefault() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
+
+            registerSympAuthy(sympauthy, registry);
+            sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
+            attach(registry, sympauthy);
+
+            flow.run();
+
+            // With no withAuthorizationParam call the authorize request is exactly what it always was.
+            TestFlowServer.RecordedRequest authorize = sympauthy.firstRequest("GET", "/api/oauth2/authorize");
+            assertEquals(List.of("response_type", "client_id", "redirect_uri", "scope", "state",
+                    "code_challenge", "code_challenge_method"), paramNames(authorize.query()));
+        }
+    }
+
+    @Test
+    void refusesAuthorizationParamsTheDriverComputes() {
+        try (InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app"))) {
+            InteractiveFlow flow = registry.newFlow();
+
+            // Tampering with one of these would produce a request run() could not exchange afterwards, so
+            // it is refused — naming the parameter — rather than silently honoured.
+            for (String computed : List.of("response_type", "client_id", "redirect_uri", "scope", "state",
+                    "code_challenge", "code_challenge_method")) {
+                IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                        () -> flow.withAuthorizationParam(computed, "tampered"));
+                assertTrue(failure.getMessage().contains(computed), failure.getMessage());
+            }
+            assertThrows(IllegalArgumentException.class, () -> flow.withAuthorizationParam(" ", "x"));
+            assertThrows(IllegalArgumentException.class, () -> flow.withAuthorizationParam("prompt", null));
+        }
+    }
+
+    @Test
     void abortsWhenSympAuthyRedirectsToTheErrorPage() {
         try (TestFlowServer sympauthy = new TestFlowServer();
                 InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
@@ -340,6 +414,11 @@ class InteractiveFlowTest {
 
             assertThrows(IllegalArgumentException.class, flow::drive);
         }
+    }
+
+    /** The query parameter names of a recorded request, in the order they were sent. */
+    private static List<String> paramNames(String query) {
+        return Arrays.stream(query.split("&")).map(pair -> pair.substring(0, pair.indexOf('='))).toList();
     }
 
     private static void registerSympAuthy(TestFlowServer sympauthy, InteractiveFlowRegistry registry) {

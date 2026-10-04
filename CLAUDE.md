@@ -205,6 +205,18 @@ Key points when extending:
   mitigation). The module only *sends* it, verified Docker-free in `InteractiveFlowTest`; **echoing it
   is a server capability**, so the end-to-end "`id_token` carries the nonce" check lives in SympAuthy's
   own integration tests, not here.
+- **`InteractiveFlow.withAuthorizationParam(name, value)`** is the *generic* form of those two: any extra
+  `/authorize` query parameter (`claims`, `max_age`, `prompt`, `login_hint`, `acr_values`, …), per run,
+  callable repeatedly. The registry applies the map **after** the parameters it computes in
+  `authorizeParams(...)` (so a value set both ways wins over `withNonce`/`withInvitationToken`) and
+  `appendQuery` url-encodes it, so a JSON object or a space-separated list survives the query string. The
+  parameters the driver computes — `InteractiveFlowRegistry.RESERVED_AUTHORIZATION_PARAMS`
+  (`response_type`, `client_id`, `redirect_uri`, `scope`, `state`, `code_challenge`,
+  `code_challenge_method`) — are **refused** with `IllegalArgumentException`: they are what lets `run()`'s
+  `AuthorizationResult.exchange()` work afterwards, so a test that wants one of them malformed has to issue
+  the authorize request itself. **Prefer extending this over adding a named setter** for each new spec
+  parameter; `withNonce`/`withInvitationToken` remain the ergonomic spelling for theirs. The module only
+  *sends* it, so it is verified Docker-free.
 - **Traversed steps are accumulated on the flow.** The registry's `emit(...)` appends each `FlowStep`
   to the running flow (a package-private `CopyOnWriteArrayList`, reset at the start of each `run()`)
   *before* notifying the listener, and `InteractiveFlow.stepTypes()` exposes the `List<FlowStep.Type>`
@@ -248,9 +260,10 @@ Key points when extending:
 - **Unit tests are Docker-free**: the interactive-flow tests (`src/test/java/.../flow/`) run the mock
   frontend against a stub SympAuthy (the in-JVM `TestFlowServer`) whose `/authorize` redirects to the
   frontend's page URLs and whose Flow API returns scripted `redirect_url`s (`InteractiveFlowTest`, which
-  also covers the confidential-client exchange). `TokenClientTest` (`.../client/`, with its own small
-  recording server) and `ClientTest` (root package) cover the token client and credential authentication
-  directly. `SignUpWithInteractiveFlowIT` and `SignInWithInteractiveFlowIT` boot a real container and
+  also covers the confidential-client exchange); `TestFlowServer` records each request's **raw** query, so
+  a test can assert on what went over the wire, and `RecordedRequest.queryParam` decodes one value back.
+  `TokenClientTest` (`.../client/`, with its own small recording server) and `ClientTest` (root package)
+  cover the token client and credential authentication directly. `SignUpWithInteractiveFlowIT` and `SignInWithInteractiveFlowIT` boot a real container and
   wire the frontend with `withFlows`.
 - **How the redirects flow (verified):** with the flow's page URLs pointing at the mock frontend,
   `/authorize` 303-redirects the browser to `<frontend>/sign-in?state=<jwt>`; each page's Flow API call

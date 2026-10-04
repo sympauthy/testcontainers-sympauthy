@@ -2,7 +2,9 @@ package com.sympauthy.testcontainers.flow;
 
 import com.sympauthy.testcontainers.client.TokenResponse;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -41,6 +43,11 @@ public final class InteractiveFlow {
     // When set, sent as the nonce query parameter on the authorize request that starts this run; the
     // issued id_token must echo it back unchanged (OpenID Connect Core replay mitigation).
     String nonce;
+
+    // Extra query parameters for the authorize request that starts this run, set by
+    // withAuthorizationParam(...) — the escape hatch for parameters this module does not model. Applied
+    // after the ones the registry computes, which withAuthorizationParam refuses to let a caller set.
+    final Map<String, String> authorizationParams = new LinkedHashMap<>();
 
     // Set by driveFrom(...) for a link-driven run: the server-returned step link to start from, and the
     // success/cancel URLs to recognize as terminals. All must belong to the mock frontend.
@@ -131,6 +138,45 @@ public final class InteractiveFlow {
      */
     public InteractiveFlow withNonce(String nonce) {
         this.nonce = nonce;
+        return this;
+    }
+
+    /**
+     * Adds an arbitrary query parameter to the authorization request that starts this run — the escape
+     * hatch for an {@code /authorize} parameter this module does not model ({@code claims},
+     * {@code max_age}, {@code prompt}, {@code login_hint}, {@code acr_values}, …). Call it once per
+     * parameter; the value is url-encoded, so one needing it — a JSON object, a space-separated list —
+     * reaches the server intact. The run stays an ordinary {@link #run()}: the driver still generates the
+     * PKCE pair and the {@link AuthorizationResult} still {@link AuthorizationResult#exchange() exchanges}.
+     *
+     * <p>The parameters the driver computes — {@code response_type}, {@code client_id},
+     * {@code redirect_uri}, {@code scope}, {@code state}, {@code code_challenge} and
+     * {@code code_challenge_method} — are what make that exchange possible, so setting one is refused
+     * rather than honoured; a test that needs one of them malformed has to issue the authorization
+     * request itself. {@code nonce} and {@code invitation_token} may be set here, but
+     * {@link #withNonce(String)} and {@link #withInvitationToken(String)} spell them better; set both
+     * ways, the value given here wins.
+     *
+     * @param name  the query parameter name
+     * @param value the value, unencoded
+     * @return this flow, for chaining
+     * @throws IllegalArgumentException if {@code name} is blank or names a parameter the driver computes,
+     *                                  or if {@code value} is {@code null}
+     */
+    public InteractiveFlow withAuthorizationParam(String name, String value) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Authorization parameter name must not be blank");
+        }
+        if (InteractiveFlowRegistry.RESERVED_AUTHORIZATION_PARAMS.contains(name)) {
+            throw new IllegalArgumentException("Authorization parameter '" + name + "' is computed by the"
+                    + " flow driver and cannot be overridden; issue the authorization request yourself if a"
+                    + " test needs to change it");
+        }
+        if (value == null) {
+            throw new IllegalArgumentException(
+                    "Value of authorization parameter '" + name + "' must not be null");
+        }
+        authorizationParams.put(name, value);
         return this;
     }
 
