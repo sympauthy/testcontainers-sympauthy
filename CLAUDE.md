@@ -56,6 +56,22 @@ Gradle (Kotlin DSL), Gradle wrapper 9.6.1, Java 17 bytecode target.
 `integrationTest` is a separate source set, not part of `check`/`build` — run it explicitly, and only
 with a Docker (or Podman/Colima/etc.) engine available.
 
+## Merging pull requests
+
+Always merge with **squash** and leave no branch behind — remote *and* local — then return to an
+up-to-date `main`:
+
+```bash
+gh pr merge <number> --squash --delete-branch   # squash-merge + delete the remote branch
+git checkout main                               # leave the merged branch
+git pull                                        # fast-forward main onto the squashed commit
+git branch -d <branch>                          # only if --delete-branch left the local branch
+```
+
+`--delete-branch` usually removes the local branch too when run from its checkout, so the last step
+is a safety net, not a routine one. The invariant: after a merge the working copy sits on `main` at
+the merged history, and the feature branch is gone from both the remote and the local clone.
+
 ## Two source sets, two kinds of test
 
 - **`src/test/java` (unit, no Docker).** These call the Docker-free `configure()` directly and assert
