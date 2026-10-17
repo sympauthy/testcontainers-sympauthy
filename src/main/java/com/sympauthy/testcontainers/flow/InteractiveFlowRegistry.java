@@ -502,7 +502,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         if (body.get("methods") instanceof List<?> methods) {
             for (Object element : methods) {
                 if (element instanceof Map<?, ?> method
-                        && "TOTP".equals(String.valueOf(method.get("method")))) {
+                        && "totp".equals(String.valueOf(method.get("method")))) {
                     Object url = method.get("redirect_url");
                     return url == null ? null : url.toString();
                 }

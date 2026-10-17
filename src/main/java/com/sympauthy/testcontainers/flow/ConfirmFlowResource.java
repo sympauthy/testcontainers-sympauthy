@@ -8,7 +8,7 @@ import java.util.Map;
  * test can decide whether to {@link ConfirmDecision#CONFIRM approve} or {@link ConfirmDecision#CANCEL
  * cancel} it, and assert on who initiated it.
  *
- * <p>While the action is pending, {@link #action()} (e.g. {@code "ENROLL_MFA"}) and
+ * <p>While the action is pending, {@link #action()} (e.g. {@code "enroll_mfa"}) and
  * {@link #initiatingClientId()} are set and {@link #redirectUrl()} is {@code null}; once already
  * confirmed (or when there is no confirm step), only {@link #redirectUrl()} is set. A {@code null}
  * {@link #initiatingClientId()} means an administrator, rather than a client, initiated the action.
@@ -36,7 +36,7 @@ public final class ConfirmFlowResource {
                 map);
     }
 
-    /** The action to confirm (e.g. {@code "ENROLL_MFA"}), or {@code null} once already confirmed. */
+    /** The action to confirm (e.g. {@code "enroll_mfa"}), or {@code null} once already confirmed. */
     public String action() {
         return action;
     }

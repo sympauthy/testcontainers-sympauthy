@@ -110,7 +110,7 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
             AtomicReference<String> secret = new AtomicReference<>();
             FlowResult approved = registry.newFlow()
                     .withConfirmHandler(resource -> {
-                        assertEquals("ENROLL_MFA", resource.action(), "confirm should describe the action");
+                        assertEquals("enroll_mfa", resource.action(), "confirm should describe the action");
                         assertEquals(CLIENT_ID, resource.initiatingClientId(),
                                 "confirm should name the initiating client");
                         return ConfirmDecision.CONFIRM;
