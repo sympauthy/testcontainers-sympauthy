@@ -406,18 +406,21 @@ class InteractiveFlowTest {
     void picksTheTotpMethodWhenTheMfaChallengeListsMethodsWithoutAnAutoRedirect() {
         try (TestFlowServer sympauthy = new TestFlowServer();
                 InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
-            String totpCode = Totp.code(SECRET);
             InteractiveFlow flow = registry.newFlow()
                     .withSignInHandler(configuration -> Credentials.of("ada@example.com", "s3cret"))
-                    .withTotpChallengeHandler(() -> totpCode);
+                    .withTotpChallengeHandler(() -> "123456");
 
             registerSympAuthy(sympauthy, registry);
             sympauthy.route("POST", "/api/v1/flow/sign-in", request -> TestFlowServer.Response.json(200,
                     redirectTo(registry.frontendUrl() + "/mfa-selection-for-challenge?state=" + FLOW_STATE)));
-            // Neither redirect_url nor skip_redirect_url: the driver has to pick a method from the list,
-            // which carries the lowercase enum values the API standard prescribes.
+            // Neither redirect_url nor skip_redirect_url: the driver has to pick a method from the list.
+            // A method it cannot drive comes first, so following the first entry would end on a page
+            // this frontend does not serve.
             sympauthy.route("GET", "/api/v1/flow/mfa/challenge", request -> TestFlowServer.Response.json(200,
-                    "{\"methods\":[{\"method\":\"totp\",\"redirect_url\":\""
+                    "{\"methods\":["
+                            + "{\"method\":\"webauthn\",\"redirect_url\":\""
+                            + registry.frontendUrl() + "/mfa-webauthn-challenge?state=" + FLOW_STATE + "\"},"
+                            + "{\"method\":\"totp\",\"redirect_url\":\""
                             + registry.frontendUrl() + "/mfa-totp-challenge?state=" + FLOW_STATE + "\"}]}"));
             sympauthy.route("POST", "/api/v1/flow/mfa/totp", request -> TestFlowServer.Response.json(200,
                     redirectTo(registry.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
@@ -429,7 +432,25 @@ class InteractiveFlowTest {
             assertEquals(List.of(FlowStep.Type.SIGN_IN, FlowStep.Type.MFA, FlowStep.Type.COMPLETED),
                     flow.stepTypes());
             assertTrue(sympauthy.firstRequest("POST", "/api/v1/flow/mfa/totp").body()
-                    .contains("\"code\":\"" + totpCode + "\""));
+                    .contains("\"code\":\"123456\""));
+        }
+    }
+
+    @Test
+    void rethrowsAFailedAssertionFromAHandler() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withSignInHandler(configuration -> {
+                        throw new AssertionError("sign-in offered the wrong claims");
+                    });
+
+            registerSympAuthy(sympauthy, registry);
+            attach(registry, sympauthy);
+
+            // The handler's own failure, not the transport error of a dropped connection.
+            AssertionError failure = assertThrows(AssertionError.class, flow::run);
+            assertEquals("sign-in offered the wrong claims", failure.getMessage());
         }
     }
 

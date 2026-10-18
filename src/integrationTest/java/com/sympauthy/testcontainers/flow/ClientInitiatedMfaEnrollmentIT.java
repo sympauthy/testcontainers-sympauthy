@@ -107,12 +107,11 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
             String userToken = signUpUser(email);
             String link = initiateEnrollment(userToken);
 
+            AtomicReference<ConfirmFlowResource> confirm = new AtomicReference<>();
             AtomicReference<String> secret = new AtomicReference<>();
             FlowResult approved = registry.newFlow()
                     .withConfirmHandler(resource -> {
-                        assertEquals("enroll_mfa", resource.action(), "confirm should describe the action");
-                        assertEquals(CLIENT_ID, resource.initiatingClientId(),
-                                "confirm should name the initiating client");
+                        confirm.set(resource);
                         return ConfirmDecision.CONFIRM;
                     })
                     .withTotpEnrollmentHandler(data -> {
@@ -123,6 +122,8 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
                     .drive();
 
             assertEquals(FlowOutcome.SUCCESS, approved.outcome(), "approving should complete enrollment");
+            assertEquals("enroll_mfa", confirm.get().action(), "confirm should describe the action");
+            assertEquals(CLIENT_ID, confirm.get().initiatingClientId(), "confirm should name the initiating client");
             assertTrue(approved.stepTypes().contains(FlowStep.Type.CONFIRM), approved.stepTypes().toString());
             assertTrue(approved.stepTypes().contains(FlowStep.Type.MFA), approved.stepTypes().toString());
             assertNotNull(secret.get(), "enrollment should expose a TOTP secret");

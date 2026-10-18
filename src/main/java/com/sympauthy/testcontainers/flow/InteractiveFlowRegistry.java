@@ -109,7 +109,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
     private FlowApiClient api;
     private volatile String capturedCode;
     private volatile String capturedState;
-    private volatile RuntimeException failure;
+    private volatile Throwable failure;
 
     // Per-run state for a link-driven flow (driveFrom/drive): the terminal reached and its query params.
     private volatile FlowOutcome outcome;
@@ -259,9 +259,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         HttpResponse<String> response = send(browser,
                 HttpRequest.newBuilder(URI.create(authorizeUrl)).GET().build());
 
-        if (failure != null) {
-            throw failure;
-        }
+        throwFailure();
         if (capturedCode == null) {
             throw new FlowException("Flow did not reach the client callback (ended at " + response.uri()
                     + ", HTTP " + response.statusCode() + ")");
@@ -304,9 +302,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         HttpResponse<String> response = send(browser,
                 HttpRequest.newBuilder(URI.create(flow.startUrl)).GET().build());
 
-        if (failure != null) {
-            throw failure;
-        }
+        throwFailure();
         if (outcome == null) {
             throw new FlowException("Flow did not reach the success or cancel URL (ended at " + response.uri()
                     + ", HTTP " + response.statusCode() + ")");
@@ -365,7 +361,9 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
                     respond(exchange, 404, "unsupported flow page");
                 }
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
+            // An Error is kept too: a failed assertion inside a handler would otherwise escape to the
+            // HttpServer, which drops the connection and leaves the run with a bare transport error.
             failure = e;
             safeRespond(exchange, 500);
         } catch (Exception e) {
@@ -496,6 +494,16 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         terminalParams = queryParams(query);
         respond(exchange, 200, "ok");
         return true;
+    }
+
+    /** Rethrows what a page recorded as the run's failure, if anything; only unchecked throwables are kept. */
+    private void throwFailure() {
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        if (failure instanceof RuntimeException exception) {
+            throw exception;
+        }
     }
 
     private static String totpMethodRedirect(Map<String, Object> body) {
