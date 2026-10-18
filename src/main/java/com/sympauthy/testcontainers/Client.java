@@ -1,5 +1,6 @@
 package com.sympauthy.testcontainers;
 
+import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -25,7 +26,10 @@ public final class Client {
 
     /** How a confidential client transmits its secret to the token endpoint. */
     public enum ClientAuthMethod {
-        /** HTTP Basic: {@code Authorization: Basic base64(client_id:client_secret)} ({@code client_secret_basic}). */
+        /**
+         * HTTP Basic: {@code Authorization: Basic base64(client_id:client_secret)}, each half form-encoded
+         * ({@code client_secret_basic}).
+         */
         BASIC,
         /** Form body: a {@code client_secret} parameter alongside {@code client_id} ({@code client_secret_post}). */
         POST
@@ -94,8 +98,18 @@ public final class Client {
         }
     }
 
+    /**
+     * The {@code Authorization: Basic} header value authenticating {@code id} with {@code secret}. RFC 6749
+     * §2.3.1 has each half form-encoded before the pair is base64-encoded, so a secret holding {@code +},
+     * {@code /}, {@code =}, {@code %}, a space or a non-ASCII character survives the round trip — SympAuthy
+     * form-decodes both halves after splitting them on the first {@code :}.
+     */
     private static String basicAuth(String id, String secret) {
-        byte[] credentials = (id + ":" + secret).getBytes(StandardCharsets.UTF_8);
-        return "Basic " + Base64.getEncoder().encodeToString(credentials);
+        String pair = encode(id) + ":" + encode(secret);
+        return "Basic " + Base64.getEncoder().encodeToString(pair.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }
