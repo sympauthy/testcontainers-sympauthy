@@ -5,6 +5,7 @@ import com.sympauthy.testcontainers.client.TokenResponse;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -109,6 +110,36 @@ class InteractiveFlowTest {
                     .encodeToString("test-app:s3cr3t".getBytes(StandardCharsets.UTF_8));
             assertEquals(expected, token.headers().get("Authorization"));
             assertFalse(token.body().contains("client_secret="), token.body());
+        }
+    }
+
+    @Test
+    void exposesTheVerifierOfTheChallengeSentOnAuthorize() throws Exception {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app")).withScopes("openid")) {
+            InteractiveFlow flow = registry.newFlow()
+                    .withSignUpHandler(configuration -> Map.of("email", "ada@example.com", "password", "s3cret"));
+
+            registerSympAuthy(sympauthy, registry);
+            sympauthy.route("POST", "/api/v1/flow/sign-up", request ->
+                    TestFlowServer.Response.json(200, redirectTo(registry.frontendUrl() + "/callback?state=oauth&code=" + CODE)));
+            attach(registry, sympauthy);
+
+            AuthorizationResult result = flow.run();
+
+            // The verifier is the one behind the S256 challenge the authorize request carried, so a test
+            // can present the code in a token request it builds itself.
+            TestFlowServer.RecordedRequest authorize = sympauthy.firstRequest("GET", "/api/oauth2/authorize");
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(result.codeVerifier().getBytes(StandardCharsets.US_ASCII));
+            assertEquals(Base64.getUrlEncoder().withoutPadding().encodeToString(digest),
+                    TestFlowServer.RecordedRequest.queryParam(authorize.query(), "code_challenge"));
+
+            // exchange() still sends that same verifier.
+            result.exchange();
+            TestFlowServer.RecordedRequest token = sympauthy.firstRequest("POST", "/api/oauth2/token");
+            assertEquals(result.codeVerifier(),
+                    TestFlowServer.RecordedRequest.queryParam(token.body(), "code_verifier"));
         }
     }
 

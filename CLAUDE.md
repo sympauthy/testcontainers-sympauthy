@@ -269,6 +269,14 @@ Key points when extending:
   hands you the `Client` to build one). The module only *sends* the secret (verified Docker-free in
   `TokenClientTest`/`InteractiveFlowTest`); the end-to-end confidential exchange / revoke / introspect
   proof lives in SympAuthy's own integration tests.
+- **The run's PKCE verifier is readable.** `AuthorizationResult.codeVerifier()` answers the verifier
+  behind the challenge `run()` sent, so a scenario can exchange the code through a token request of its
+  own (e.g. sympauthy's generated client) — with the code and the registry's `clientId()`/
+  `clientSecret()`/`redirectUri()` it holds every value the request carries. `exchange()` stays for a
+  scenario with nothing to prove about the token request. Prefer this over opening the reserved
+  `code_challenge`/`code_challenge_method` params: the driver keeps generating the pair.
+  `ExchangeCodeWithOwnTokenRequestIT` proves it end to end for a public and a confidential client (two
+  registries with distinct `withFlowId`s on one container).
 - **`JsonCodec` is the only class that touches the JSON parser.** It wraps `minimal-json` and lives in
   `com.sympauthy.testcontainers.internal.json` (public, shared by `flow` and `client`) — the same
   package the Shadow plugin relocates `minimal-json` into. Internal, non-published utilities live under
