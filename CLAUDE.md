@@ -72,6 +72,44 @@ git branch -d <branch>                          # only if --delete-branch left t
 is a safety net, not a routine one. The invariant: after a merge the working copy sits on `main` at
 the merged history, and the feature branch is gone from both the remote and the local clone.
 
+## Cutting a release
+
+Releases are published by the manually dispatched `Release` workflow (`.github/workflows/release.yml`),
+which reads the version straight from `gradle.properties`. During a cycle `version` sits at a patch
+placeholder (e.g. `0.6.1` right after `0.6.0` shipped) — that is only a marker that `main` is past the
+last release, **not** the next version. The release version is the caller's choice (`0.7.0` for a
+feature cycle), so the dance is bump → dispatch → bump again, with both bumps committed **straight to
+`main`** (version bumps don't go through a PR):
+
+```bash
+# 1. set the release version, push to main
+sed -i '' 's/^version=.*/version=0.7.0/' gradle.properties
+git commit -am "Bump version to 0.7.0" && git push origin main
+
+# 2. dispatch + follow the release
+gh workflow run release.yml --ref main
+gh run list --workflow=release.yml --limit 1          # grab the run id
+gh run watch <run-id> --exit-status --interval 15
+
+# 3. reopen the cycle, push to main
+sed -i '' 's/^version=.*/version=0.7.1/' gradle.properties
+git commit -am "Bump version to 0.7.1 for next cycle" && git push origin main
+```
+
+The workflow refuses a `-SNAPSHOT` version and refuses a version already present in GitHub Packages,
+runs the unit tests **and** the integration tests, publishes to GitHub Packages, then tags `v<version>`
+and creates the GitHub release (notes `--generate-notes`, assets = the main/sources/javadoc jars). Tag
+and release only happen after a successful publish, so a failed run leaves nothing behind.
+
+- **A published version is final** — the duplicate check blocks a re-release, so a botched version
+  number costs a new one. Confirm the number before step 1.
+- **`skip_integration_tests` is for one case only**: the SympAuthy image the ITs need isn't published
+  yet (see "Dependency versioning" and the nightly default image). Then
+  `gh workflow run release.yml --ref main -f skip_integration_tests=true`; the run logs a loud warning.
+  Otherwise leave it off — green ITs on the last PR run are the signal the nightly still fits.
+- **Nothing else carries the version**: the README dependency snippet is a literal `x.x.x` placeholder
+  and there is no CHANGELOG, so `gradle.properties` is the single edit.
+
 ## Two source sets, two kinds of test
 
 - **`src/test/java` (unit, no Docker).** These call the Docker-free `configure()` directly and assert
