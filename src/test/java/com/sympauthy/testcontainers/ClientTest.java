@@ -57,4 +57,20 @@ class ClientTest {
         assertEquals("app", form.get("client_id"));
         assertFalse(form.containsKey("client_secret"));
     }
+
+    @Test
+    void basicAuthFormEncodesBothCredentials() {
+        Map<String, String> form = new LinkedHashMap<>();
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost/token"));
+
+        // A secret holding the characters form encoding escapes, and an id holding the separator.
+        Client.confidentialClient("client:1", "a+b/c= \u00e9", Client.ClientAuthMethod.BASIC)
+                .authenticate(form, request);
+
+        String header = request.build().headers().firstValue("Authorization").orElseThrow();
+        String credentials = new String(
+                Base64.getDecoder().decode(header.substring("Basic ".length())), StandardCharsets.UTF_8);
+        // RFC 6749 2.3.1: each half form-encoded, so the first ':' left is the separator SympAuthy splits on.
+        assertEquals("client%3A1:a%2Bb%2Fc%3D+%C3%A9", credentials);
+    }
 }
