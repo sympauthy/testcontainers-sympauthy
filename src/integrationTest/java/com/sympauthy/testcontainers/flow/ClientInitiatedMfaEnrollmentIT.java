@@ -123,7 +123,7 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
 
             assertEquals(FlowOutcome.SUCCESS, approved.outcome(), "approving should complete enrollment");
             assertEquals("enroll_mfa", confirm.get().action(), "confirm should describe the action");
-            assertEquals(CLIENT_ID, confirm.get().initiatingClientId(), "confirm should name the initiating client");
+            assertEquals(CLIENT_ID, confirm.get().client().id(), "confirm should name the initiating client");
             assertTrue(approved.stepTypes().contains(FlowStep.Type.CONFIRM), approved.stepTypes().toString());
             assertTrue(approved.stepTypes().contains(FlowStep.Type.MFA), approved.stepTypes().toString());
             assertNotNull(secret.get(), "enrollment should expose a TOTP secret");

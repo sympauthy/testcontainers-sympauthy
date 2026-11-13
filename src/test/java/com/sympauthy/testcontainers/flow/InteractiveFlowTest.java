@@ -373,7 +373,7 @@ class InteractiveFlowTest {
 
             // The server-orchestrated enrollment: confirm → mfa selection (auto) → totp enroll → return.
             sympauthy.route("GET", "/api/v1/flow/confirm", request -> TestFlowServer.Response.json(200,
-                    "{\"action\":\"enroll_mfa\",\"initiating_client_id\":\"test-app\"}"));
+                    "{\"action\":\"enroll_mfa\",\"client\":{\"id\":\"test-app\",\"display_name\":\"Test App\"}}"));
             sympauthy.route("POST", "/api/v1/flow/confirm", request -> TestFlowServer.Response.json(200,
                     redirectTo(registry.frontendUrl() + "/mfa-selection-for-enrollment?state=" + FLOW_STATE)));
             sympauthy.route("GET", "/api/v1/flow/mfa/enrollment", request -> TestFlowServer.Response.json(200,
@@ -390,7 +390,7 @@ class InteractiveFlowTest {
             assertEquals(FlowOutcome.SUCCESS, result.outcome());
             assertEquals(List.of(FlowStep.Type.CONFIRM, FlowStep.Type.MFA), flow.stepTypes());
             assertEquals("enroll_mfa", seen.get().action());
-            assertEquals("test-app", seen.get().initiatingClientId());
+            assertEquals(new ClientReference("test-app", "Test App"), seen.get().client());
             // State transport: GET carries ?state=, the bodyless confirm POST carries Authorization: State.
             assertEquals(FLOW_STATE, sympauthy.firstRequest("GET", "/api/v1/flow/confirm").stateQueryParam());
             TestFlowServer.RecordedRequest confirmPost = sympauthy.firstRequest("POST", "/api/v1/flow/confirm");
