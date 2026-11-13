@@ -24,6 +24,7 @@ public final class SignInFlowResource {
     private final List<Claim> passwordIdentifierClaims;
     private final List<Provider> providers;
     private final String signUpRedirectUrl;
+    private final ClientReference client;
     private final Map<String, Object> raw;
 
     private SignInFlowResource(
@@ -31,11 +32,13 @@ public final class SignInFlowResource {
             List<Claim> passwordIdentifierClaims,
             List<Provider> providers,
             String signUpRedirectUrl,
+            ClientReference client,
             Map<String, Object> raw) {
         this.passwordEnabled = passwordEnabled;
         this.passwordIdentifierClaims = List.copyOf(passwordIdentifierClaims);
         this.providers = List.copyOf(providers);
         this.signUpRedirectUrl = signUpRedirectUrl;
+        this.client = client;
         this.raw = raw;
     }
 
@@ -70,6 +73,7 @@ public final class SignInFlowResource {
                 identifierClaims,
                 providers,
                 str(map.get("sign_up_redirect_url")),
+                ClientReference.fromBody(map),
                 map);
     }
 
@@ -94,6 +98,11 @@ public final class SignInFlowResource {
     /** The URL of the sign-up page the flow cross-links to, or {@code null} when sign-up is not offered. */
     public String signUpRedirectUrl() {
         return signUpRedirectUrl;
+    }
+
+    /** The client the session was started for, or {@code null} when none started it. */
+    public ClientReference client() {
+        return client;
     }
 
     /** The full parsed response body. */
