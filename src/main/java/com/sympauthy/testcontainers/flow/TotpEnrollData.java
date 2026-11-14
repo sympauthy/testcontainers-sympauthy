@@ -12,16 +12,18 @@ public final class TotpEnrollData {
 
     private final String uri;
     private final String secret;
+    private final ClientReference client;
     private final Map<String, Object> raw;
 
-    private TotpEnrollData(String uri, String secret, Map<String, Object> raw) {
+    private TotpEnrollData(String uri, String secret, ClientReference client, Map<String, Object> raw) {
         this.uri = uri;
         this.secret = secret;
+        this.client = client;
         this.raw = raw;
     }
 
     static TotpEnrollData fromMap(Map<String, Object> map) {
-        return new TotpEnrollData(str(map.get("uri")), str(map.get("secret")), map);
+        return new TotpEnrollData(str(map.get("uri")), str(map.get("secret")), ClientReference.fromBody(map), map);
     }
 
     /** The {@code otpauth://totp/...} provisioning URI. */
@@ -32,6 +34,11 @@ public final class TotpEnrollData {
     /** The Base32-encoded TOTP shared secret. */
     public String secret() {
         return secret;
+    }
+
+    /** The client the session was started for, or {@code null} when an administrator started it. */
+    public ClientReference client() {
+        return client;
     }
 
     /** The full parsed response body. */
