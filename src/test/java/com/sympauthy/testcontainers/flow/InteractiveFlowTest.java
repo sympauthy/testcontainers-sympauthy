@@ -478,6 +478,24 @@ class InteractiveFlowTest {
     }
 
     @Test
+    void failsAReturnThatDoesNotNameTheFlow() {
+        try (TestFlowServer sympauthy = new TestFlowServer();
+                InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app"))) {
+            String returnUrl = registry.frontendUrl() + "/mfa-return";
+            InteractiveFlow flow = registry.newFlow()
+                    .driveFrom(registry.frontendUrl() + "/confirm?state=" + FLOW_STATE, returnUrl);
+
+            // No sympauthy_flow: the return path was reached, but not through SympAuthy's hand-back.
+            sympauthy.route("GET", "/api/v1/flow/confirm", request -> TestFlowServer.Response.json(200,
+                    redirectTo(returnUrl)));
+            attach(registry, sympauthy);
+
+            FlowException failure = assertThrows(FlowException.class, flow::drive);
+            assertTrue(failure.getMessage().contains("without sympauthy_flow"), failure.getMessage());
+        }
+    }
+
+    @Test
     void failsToDeclineAConfirmThatOffersNoCancelUrl() {
         try (TestFlowServer sympauthy = new TestFlowServer();
                 InteractiveFlowRegistry registry = InteractiveFlowRegistry.forClient(Client.publicClient("test-app"))) {
@@ -504,7 +522,11 @@ class InteractiveFlowTest {
                     .withConfirmHandler(resource -> ConfirmDecision.CANCEL);
 
             registerSympAuthy(sympauthy, registry);
+            // Five redirects in all (authorize, sign-in, collect-claims, confirm, cancel): more than the JDK
+            // client follows on its own, so the browser has to follow them itself.
             sympauthy.route("POST", "/api/v1/flow/sign-in", request -> TestFlowServer.Response.json(200,
+                    redirectTo(registry.frontendUrl() + "/collect-claims?state=" + FLOW_STATE)));
+            sympauthy.route("GET", "/api/v1/flow/claims", request -> TestFlowServer.Response.json(200,
                     redirectTo(registry.frontendUrl() + "/confirm?state=" + FLOW_STATE)));
             sympauthy.route("GET", "/api/v1/flow/confirm", request -> TestFlowServer.Response.json(200,
                     "{\"action\":\"enroll_mfa\",\"cancel_url\":\"" + cancelUrl(sympauthy) + "\"}"));

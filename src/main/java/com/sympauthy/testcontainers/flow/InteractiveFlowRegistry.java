@@ -78,6 +78,12 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
+    /** How many redirects the browser follows before giving up on a run as looping. */
+    private static final int MAX_REDIRECTS = 50;
+
+    /** The return parameter naming the flow, present on every return SympAuthy hands back. */
+    private static final String FLOW_PARAM = "sympauthy_flow";
+
     /** The return parameter stating how a link-driven flow ended; absent when it completed. */
     private static final String FLOW_ERROR_PARAM = "sympauthy_flow_error";
 
@@ -261,11 +267,9 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         Pkce pkce = Pkce.generate();
         String authorizeUrl = appendQuery(authorizationEndpoint, authorizeParams(randomToken(), pkce));
 
-        // A redirect-following "browser": it rides SympAuthy's 303s across the mock frontend pages
-        // until the frontend's /callback captures the code (or the /error page aborts).
-        HttpClient browser = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
-        HttpResponse<String> response = send(browser,
-                HttpRequest.newBuilder(URI.create(authorizeUrl)).GET().build());
+        // The "browser" rides SympAuthy's 303s across the mock frontend pages until the frontend's
+        // /callback captures the code (or the /error page aborts).
+        HttpResponse<String> response = browse(authorizeUrl);
 
         throwFailure();
         if (capturedError != null) {
@@ -309,9 +313,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         HttpClient apiClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
         this.api = new FlowApiClient(baseUrl, apiClient);
 
-        HttpClient browser = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
-        HttpResponse<String> response = send(browser,
-                HttpRequest.newBuilder(URI.create(flow.startUrl)).GET().build());
+        HttpResponse<String> response = browse(flow.startUrl);
 
         throwFailure();
         if (outcome == null) {
@@ -502,6 +504,12 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
             return false;
         }
         Map<String, String> params = queryParams(query);
+        if (!params.containsKey(FLOW_PARAM)) {
+            failure = new FlowException("Flow reached the return URL without " + FLOW_PARAM
+                    + ", so not through SympAuthy's hand-back: " + (query == null ? path : path + "?" + query));
+            respond(exchange, 200, "ok");
+            return true;
+        }
         String flowError = params.get(FLOW_ERROR_PARAM);
         if (flowError == null) {
             outcome = FlowOutcome.SUCCESS;
@@ -593,6 +601,28 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         active.steps.add(step);
         if (active.stepListener != null) {
             active.stepListener.onStep(step);
+        }
+    }
+
+    /**
+     * GETs {@code url} as a browser would, following every redirect until a page answers without one. The
+     * JDK client follows only a handful of redirects on its own, fewer than a flow with a few pages and a
+     * decline takes, so the redirects are followed here, up to {@link #MAX_REDIRECTS}.
+     */
+    private static HttpResponse<String> browse(String url) {
+        HttpClient browser = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+        URI uri = URI.create(url);
+        for (int redirects = 0; ; redirects++) {
+            HttpResponse<String> response = send(browser, HttpRequest.newBuilder(uri).GET().build());
+            String location = response.headers().firstValue("Location").orElse(null);
+            if (response.statusCode() / 100 != 3 || location == null) {
+                return response;
+            }
+            if (redirects == MAX_REDIRECTS) {
+                throw new FlowException("Flow redirected more than " + MAX_REDIRECTS + " times (last at "
+                        + uri + ")");
+            }
+            uri = uri.resolve(location);
         }
     }
 

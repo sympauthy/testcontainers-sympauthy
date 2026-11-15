@@ -192,8 +192,11 @@ public final class InteractiveFlow {
      *
      * <p>SympAuthy returns the user to one URL however the flow ended — the {@code return_uri} supplied to
      * the initiating endpoint, or the client's {@code clients.<id>.return-uri} when it named none — and
-     * states the outcome in the return's parameters. Both URLs must belong to this registry's mock frontend
-     * (they are verified against its internal base URL).
+     * states the outcome in the return's parameters. Declare it on the client: as its {@code return-uri},
+     * or, to name it per request as {@code return_uri}, in its {@code allowed-return-uris} — the server
+     * refuses a start request returning anywhere else, and {@code allowed-redirect-uris} serves
+     * authorizations only. Both URLs must belong to this registry's mock frontend (they are verified
+     * against its internal base URL).
      *
      * @param startUrl  the step link to start the browser at
      * @param returnUrl the URL the flow returns the user to, however it ended

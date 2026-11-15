@@ -87,16 +87,15 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
             String userToken = signUpUser("cancel@example.com");
             String link = initiateEnrollment(userToken);
 
-            AtomicReference<ConfirmFlowResource> confirm = new AtomicReference<>();
             FlowResult denied = registry.newFlow()
                     .withConfirmHandler(resource -> {
-                        confirm.set(resource);
+                        // Checked here, before the driver follows it: drive() rethrows the handler's failure.
+                        assertNotNull(resource.cancelUrl(), "the confirm step should offer a cancel_url");
                         return ConfirmDecision.CANCEL;
                     })
                     .driveFrom(link, returnUri)
                     .drive();
 
-            assertNotNull(confirm.get().cancelUrl(), "the confirm step should offer a cancel_url");
             assertEquals(FlowOutcome.CANCELED, denied.outcome(),
                     "denying the confirm step should cancel the flow, returned to: " + denied.terminalUrl());
             assertEquals("auth.interactive_flow_session.cancelled", denied.terminalParam("sympauthy_flow_error"));
