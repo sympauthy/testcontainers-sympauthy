@@ -17,13 +17,15 @@ public final class ConfirmFlowResource {
 
     private final String action;
     private final ClientReference client;
+    private final String cancelUrl;
     private final String redirectUrl;
     private final Map<String, Object> raw;
 
-    private ConfirmFlowResource(String action, ClientReference client, String redirectUrl,
+    private ConfirmFlowResource(String action, ClientReference client, String cancelUrl, String redirectUrl,
             Map<String, Object> raw) {
         this.action = action;
         this.client = client;
+        this.cancelUrl = cancelUrl;
         this.redirectUrl = redirectUrl;
         this.raw = raw;
     }
@@ -32,6 +34,7 @@ public final class ConfirmFlowResource {
         return new ConfirmFlowResource(
                 str(map.get("action")),
                 ClientReference.fromBody(map),
+                str(map.get("cancel_url")),
                 str(map.get("redirect_url")),
                 map);
     }
@@ -49,6 +52,14 @@ public final class ConfirmFlowResource {
     /** The URL the server points to when the action is already confirmed (or there is no confirm step). */
     public String redirectUrl() {
         return redirectUrl;
+    }
+
+    /**
+     * The URL that leaves the flow from this step — send the browser there and the server redirects it to
+     * wherever the session hands the user back — or {@code null} when the server offers no way out of it.
+     */
+    public String cancelUrl() {
+        return cancelUrl;
     }
 
     /** The full parsed response body. */

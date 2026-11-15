@@ -24,6 +24,7 @@ public final class SignUpFlowResource {
     private final List<Claim> passwordIdentifierClaims;
     private final String signInRedirectUrl;
     private final ClientReference client;
+    private final String cancelUrl;
     private final Map<String, Object> raw;
 
     private SignUpFlowResource(
@@ -31,11 +32,13 @@ public final class SignUpFlowResource {
             List<Claim> passwordIdentifierClaims,
             String signInRedirectUrl,
             ClientReference client,
+            String cancelUrl,
             Map<String, Object> raw) {
         this.passwordEnabled = passwordEnabled;
         this.passwordIdentifierClaims = List.copyOf(passwordIdentifierClaims);
         this.signInRedirectUrl = signInRedirectUrl;
         this.client = client;
+        this.cancelUrl = cancelUrl;
         this.raw = raw;
     }
 
@@ -58,6 +61,7 @@ public final class SignUpFlowResource {
                 identifierClaims,
                 str(map.get("sign_in_redirect_url")),
                 ClientReference.fromBody(map),
+                str(map.get("cancel_url")),
                 map);
     }
 
@@ -82,6 +86,14 @@ public final class SignUpFlowResource {
     /** The client the session was started for, or {@code null} when none started it. */
     public ClientReference client() {
         return client;
+    }
+
+    /**
+     * The URL that leaves the flow from this step — send the browser there and the server redirects it to
+     * wherever the session hands the user back — or {@code null} when the server offers no way out of it.
+     */
+    public String cancelUrl() {
+        return cancelUrl;
     }
 
     /** The full parsed response body. */

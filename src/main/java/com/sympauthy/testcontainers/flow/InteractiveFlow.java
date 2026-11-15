@@ -50,10 +50,9 @@ public final class InteractiveFlow {
     final Map<String, String> authorizationParams = new LinkedHashMap<>();
 
     // Set by driveFrom(...) for a link-driven run: the server-returned step link to start from, and the
-    // success/cancel URLs to recognize as terminals. All must belong to the mock frontend.
+    // return URL to recognize as the terminal. Both must belong to the mock frontend.
     String startUrl;
-    String successUrl;
-    String cancelUrl;
+    String returnUrl;
 
     // Steps traversed during run(), appended by the registry's emit() on the server threads and read
     // back on the run()/test thread — hence a thread-safe list.
@@ -188,29 +187,28 @@ public final class InteractiveFlow {
     /**
      * Configures a <em>link-driven</em> run: instead of starting at {@code /authorize}, this flow starts
      * at {@code startUrl} — a step link a server-initiated flow handed back (e.g. the {@code redirect_url}
-     * from an admin- or client-initiated MFA enrollment) — and ends when it reaches {@code successUrl} or
-     * {@code cancelUrl}. Drive it with {@link #drive()}, which returns a {@link FlowResult} reporting which
-     * terminal was reached.
+     * from an admin- or client-initiated MFA enrollment) — and ends when it reaches {@code returnUrl}.
+     * Drive it with {@link #drive()}, which returns a {@link FlowResult} reporting how the flow ended.
      *
-     * <p>All three URLs must belong to this registry's mock frontend (they are verified against its
-     * internal base URL); {@code successUrl}/{@code cancelUrl} are the {@code return_uri}/{@code cancel_uri}
-     * you supplied to the initiating endpoint and registered as the client's redirect URIs.
+     * <p>SympAuthy returns the user to one URL however the flow ended — the {@code return_uri} supplied to
+     * the initiating endpoint, or the client's {@code clients.<id>.return-uri} when it named none — and
+     * states the outcome in the return's parameters. Both URLs must belong to this registry's mock frontend
+     * (they are verified against its internal base URL).
      *
-     * @param startUrl   the step link to start the browser at
-     * @param successUrl the URL that marks a successful completion
-     * @param cancelUrl  the URL that marks a cancellation
+     * @param startUrl  the step link to start the browser at
+     * @param returnUrl the URL the flow returns the user to, however it ended
      * @return this flow, for chaining
      */
-    public InteractiveFlow driveFrom(String startUrl, String successUrl, String cancelUrl) {
+    public InteractiveFlow driveFrom(String startUrl, String returnUrl) {
         this.startUrl = startUrl;
-        this.successUrl = successUrl;
-        this.cancelUrl = cancelUrl;
+        this.returnUrl = returnUrl;
         return this;
     }
 
     /**
-     * Drives a {@link #driveFrom(String, String, String) link-driven} flow from its start link to a
-     * terminal and returns the {@link FlowResult} (SUCCESS or CANCELED). Call {@link #driveFrom} first.
+     * Drives a {@link #driveFrom(String, String) link-driven} flow from its start link to its return URL
+     * and returns the {@link FlowResult}, whose {@link FlowResult#outcome() outcome} the return's
+     * {@code sympauthy_flow_error} parameter decides. Call {@link #driveFrom} first.
      */
     public FlowResult drive() {
         return registry.drive(this);

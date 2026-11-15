@@ -177,8 +177,15 @@ Rules when extending:
   future email/SMS-validation tier. `flowProperties()` **always** emits `confirm` and the four `mfa-*`
   page URLs (harmless when off), so enabling MFA is just `container.withMfa()`.
 - **Link-driven runs for server-initiated flows:** the test calls the entry point itself, then
-  `driveFrom(startUrl, successUrl, cancelUrl)` + `drive()` → `FlowResult`/`FlowOutcome`. Such a flow
+  `driveFrom(startUrl, returnUrl)` + `drive()` → `FlowResult`/`FlowOutcome`. Such a flow
   resolves its pages from `templates.clients.default.authorization-flow`, so point that at the registry.
+  The server returns every outcome to **one** URL (the start request's `return_uri`, else the client's
+  `clients.<id>.return-uri`), so the outcome is read from its `sympauthy_flow_error` parameter, never the
+  path: absent → `SUCCESS`, `auth.interactive_flow_session.cancelled` → `CANCELED`, other → `FAILED`.
+  `FlowResult.returnState()` reads the echoed `sympauthy_return_state`; asserting on it is the test's job.
+- **Leaving a flow follows the step's `cancel_url`** (a `GET` the server 303s to the hand-back), exposed as
+  `cancelUrl()` on the step resources. `ConfirmDecision.CANCEL` sends the browser there and fails the run
+  when the step offers none — never hand-build `/api/v1/flow/cancel`.
 - **Flow keys are flat and validated at startup** — `flows.<id>.{type, sign-in, sign-up, collect-claims,
   validate-claims, error}` must all be present, else `/authorize` returns HTTP 500 `config.invalid`
   while the container still boots (the readiness printer only logs the errors).
