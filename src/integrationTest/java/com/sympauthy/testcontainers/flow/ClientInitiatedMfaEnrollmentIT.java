@@ -18,15 +18,17 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Drives a <em>client-initiated</em> interactive flow: a confidential client calls
  * {@code POST /api/v1/client/mfa/enrollment} to start a standalone MFA-enrollment flow for one of its
- * users, and the returned step link is driven through the new {@code CONFIRM} step. One test proves that
- * cancelling at the confirm step yields {@link FlowOutcome#CANCELED}; the other that approving it enrolls
- * TOTP ({@link FlowOutcome#SUCCESS}) and that enrollment genuinely took, by then requiring a TOTP
- * challenge when the user signs in again.
+ * users, and the returned step link is driven through the {@code CONFIRM} step. Either way the flow returns
+ * the user to the client's {@code return-uri}, whose parameters say how it ended. One test proves that
+ * declining at the confirm step leaves through its {@code cancel_url} and yields
+ * {@link FlowOutcome#CANCELED}; the other that approving it enrolls TOTP ({@link FlowOutcome#SUCCESS}) and
+ * that enrollment genuinely took, by then requiring a TOTP challenge when the user signs in again.
  *
  * <p>Both scenarios share one container (the setup is identical) and each enrols a <em>distinct</em> user,
  * so they are independent of execution order.
@@ -37,11 +39,11 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
     private static final String CLIENT_ID = "mfa-app";
     private static final String CLIENT_SECRET = "s3cr3t-mfa";
     private static final String PASSWORD = "Str0ngP@ssw0rd!";
+    private static final String RETURN_STATE = "xyz";
 
     private InteractiveFlowRegistry registry;
     private SympauthyContainer sympauthy;
     private String returnUri;
-    private String cancelUri;
     private String clientToken;
 
     @BeforeAll
@@ -54,7 +56,6 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
                 .withConfig(config(registry))
                 .withFlows(registry);
         returnUri = returnUri(registry);
-        cancelUri = cancelUri(registry);
         try {
             sympauthy.start();
 
@@ -87,12 +88,19 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
             String link = initiateEnrollment(userToken);
 
             FlowResult denied = registry.newFlow()
-                    .withConfirmHandler(resource -> ConfirmDecision.CANCEL)
-                    .driveFrom(link, returnUri, cancelUri)
+                    .withConfirmHandler(resource -> {
+                        // Checked here, before the driver follows it: drive() rethrows the handler's failure.
+                        assertNotNull(resource.cancelUrl(), "the confirm step should offer a cancel_url");
+                        return ConfirmDecision.CANCEL;
+                    })
+                    .driveFrom(link, returnUri)
                     .drive();
 
             assertEquals(FlowOutcome.CANCELED, denied.outcome(),
-                    "denying the confirm step should cancel the flow");
+                    "denying the confirm step should cancel the flow, returned to: " + denied.terminalUrl());
+            assertEquals("auth.interactive_flow_session.cancelled", denied.terminalParam("sympauthy_flow_error"));
+            assertEquals("mfa_enrollment", denied.terminalParam("sympauthy_flow"));
+            assertEquals(RETURN_STATE, denied.returnState(), "the return should echo the return_state sent");
             assertEquals(List.of(FlowStep.Type.CONFIRM, FlowStep.Type.CANCEL), denied.stepTypes());
         } catch (Throwable failure) {
             dumpLogs();
@@ -118,10 +126,14 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
                         secret.set(data.secret());
                         return Totp.code(data.secret());
                     })
-                    .driveFrom(link, returnUri, cancelUri)
+                    .driveFrom(link, returnUri)
                     .drive();
 
-            assertEquals(FlowOutcome.SUCCESS, approved.outcome(), "approving should complete enrollment");
+            assertEquals(FlowOutcome.SUCCESS, approved.outcome(),
+                    "approving should complete enrollment, returned to: " + approved.terminalUrl());
+            assertNull(approved.terminalParam("sympauthy_flow_error"), approved.terminalUrl());
+            assertEquals("mfa_enrollment", approved.terminalParam("sympauthy_flow"));
+            assertEquals(RETURN_STATE, approved.returnState(), "the return should echo the return_state sent");
             assertEquals("enroll_mfa", confirm.get().action(), "confirm should describe the action");
             assertEquals(CLIENT_ID, confirm.get().client().id(), "confirm should name the initiating client");
             assertTrue(approved.stepTypes().contains(FlowStep.Type.CONFIRM), approved.stepTypes().toString());
@@ -153,10 +165,13 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
         return userToken;
     }
 
-    /** Calls the client-initiated MFA-enrollment API for the given user and returns the confirm-page link. */
+    /**
+     * Calls the client-initiated MFA-enrollment API for the given user and returns the confirm-page link. It
+     * names no {@code return_uri}, so the flow returns to the client's {@code return-uri}, echoing the
+     * {@link #RETURN_STATE} it sends.
+     */
     private String initiateEnrollment(String userToken) throws Exception {
-        String body = "{\"access_token\":\"" + userToken + "\",\"return_uri\":\"" + returnUri
-                + "\",\"cancel_uri\":\"" + cancelUri + "\"}";
+        String body = "{\"access_token\":\"" + userToken + "\",\"return_state\":\"" + RETURN_STATE + "\"}";
         HttpResponse<String> response = apiPost(sympauthy, "/api/v1/client/mfa/enrollment", clientToken, body);
         assertEquals(200, response.statusCode(), "enrollment init should succeed, was: " + response.body());
         String redirectUrl = (String) JsonCodec.parseObject(response.body()).get("redirect_url");
@@ -168,17 +183,13 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
         return registry.frontendUrl() + "/mfa-return";
     }
 
-    private static String cancelUri(InteractiveFlowRegistry registry) {
-        return registry.frontendUrl() + "/mfa-cancel";
-    }
-
     /**
      * Password auth plus the confidential client the test owns. It needs the {@code client_credentials}
-     * grant to call the enrollment API, and its redirect URIs must include the frontend callback (for the
-     * sign-up) and the return/cancel URLs (for the enrollment). The client_credentials request for
-     * {@code users:mfa:write} must be in {@code allowed-scopes} to pass the token endpoint's scope check,
-     * and {@code features.grant-unhandled-scopes} then lets the grant actually hand it out (there is no
-     * dedicated scope-granting rule).
+     * grant to call the enrollment API, its redirect URIs must include the frontend callback (for the
+     * sign-up), and its {@code return-uri} is where the enrollment hands the user back. The
+     * client_credentials request for {@code users:mfa:write} must be in {@code allowed-scopes} to pass the
+     * token endpoint's scope check, and {@code features.grant-unhandled-scopes} then lets the grant actually
+     * hand it out (there is no dedicated scope-granting rule).
      */
     private static Map<String, Object> config(InteractiveFlowRegistry registry) {
         return Map.of(
@@ -197,8 +208,8 @@ class ClientInitiatedMfaEnrollmentIT extends AbstractSympauthyContainerIT {
                         "allowed-grant-types", List.of("authorization_code", "client_credentials"),
                         "allowed-scopes", List.of("openid", "users:mfa:write"),
                         "default-scopes", List.of("openid"),
-                        "allowed-redirect-uris", List.of(
-                                registry.redirectUri(), returnUri(registry), cancelUri(registry)))));
+                        "allowed-redirect-uris", List.of(registry.redirectUri()),
+                        "return-uri", returnUri(registry))));
     }
 
     private void dumpLogs() {

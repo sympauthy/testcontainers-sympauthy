@@ -13,17 +13,21 @@ public final class TotpEnrollData {
     private final String uri;
     private final String secret;
     private final ClientReference client;
+    private final String cancelUrl;
     private final Map<String, Object> raw;
 
-    private TotpEnrollData(String uri, String secret, ClientReference client, Map<String, Object> raw) {
+    private TotpEnrollData(String uri, String secret, ClientReference client, String cancelUrl,
+            Map<String, Object> raw) {
         this.uri = uri;
         this.secret = secret;
         this.client = client;
+        this.cancelUrl = cancelUrl;
         this.raw = raw;
     }
 
     static TotpEnrollData fromMap(Map<String, Object> map) {
-        return new TotpEnrollData(str(map.get("uri")), str(map.get("secret")), ClientReference.fromBody(map), map);
+        return new TotpEnrollData(str(map.get("uri")), str(map.get("secret")), ClientReference.fromBody(map),
+                str(map.get("cancel_url")), map);
     }
 
     /** The {@code otpauth://totp/...} provisioning URI. */
@@ -39,6 +43,14 @@ public final class TotpEnrollData {
     /** The client the session was started for, or {@code null} when an administrator started it. */
     public ClientReference client() {
         return client;
+    }
+
+    /**
+     * The URL that leaves the flow from this step — send the browser there and the server redirects it to
+     * wherever the session hands the user back — or {@code null} when the server offers no way out of it.
+     */
+    public String cancelUrl() {
+        return cancelUrl;
     }
 
     /** The full parsed response body. */

@@ -71,12 +71,24 @@ import java.util.Set;
  *
  * <p>A flow that a server-initiated endpoint started (an admin- or client-initiated MFA enrollment)
  * begins at a step link rather than {@code /authorize}: configure it with
- * {@link InteractiveFlow#driveFrom(String, String, String)} and run it with
- * {@link InteractiveFlow#drive()}, which reports whether it reached the success or cancel URL.
+ * {@link InteractiveFlow#driveFrom(String, String)} and run it with {@link InteractiveFlow#drive()},
+ * which reports how it ended from the parameters of the return URL it reached.
  */
 public final class InteractiveFlowRegistry implements AutoCloseable {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    /** How many redirects the browser follows before giving up on a run as looping. */
+    private static final int MAX_REDIRECTS = 50;
+
+    /** The return parameter naming the flow, present on every return SympAuthy hands back. */
+    private static final String FLOW_PARAM = "sympauthy_flow";
+
+    /** The return parameter stating how a link-driven flow ended; absent when it completed. */
+    private static final String FLOW_ERROR_PARAM = "sympauthy_flow_error";
+
+    /** The {@link #FLOW_ERROR_PARAM} value of a flow the user left. */
+    private static final String CANCELLED_FLOW_ERROR = "auth.interactive_flow_session.cancelled";
 
     /**
      * The authorization-request parameters {@link #authorizeParams} computes itself — keep the two in sync.
@@ -109,6 +121,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
     private FlowApiClient api;
     private volatile String capturedCode;
     private volatile String capturedState;
+    private volatile String capturedError;
     private volatile Throwable failure;
 
     // Per-run state for a link-driven flow (driveFrom/drive): the terminal reached and its query params.
@@ -241,6 +254,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         flow.steps.clear();
         capturedCode = null;
         capturedState = null;
+        capturedError = null;
         failure = null;
 
         HttpClient apiClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
@@ -253,13 +267,15 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         Pkce pkce = Pkce.generate();
         String authorizeUrl = appendQuery(authorizationEndpoint, authorizeParams(randomToken(), pkce));
 
-        // A redirect-following "browser": it rides SympAuthy's 303s across the mock frontend pages
-        // until the frontend's /callback captures the code (or the /error page aborts).
-        HttpClient browser = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
-        HttpResponse<String> response = send(browser,
-                HttpRequest.newBuilder(URI.create(authorizeUrl)).GET().build());
+        // The "browser" rides SympAuthy's 303s across the mock frontend pages until the frontend's
+        // /callback captures the code (or the /error page aborts).
+        HttpResponse<String> response = browse(authorizeUrl);
 
         throwFailure();
+        if (capturedError != null) {
+            throw new FlowException("Flow reached the client callback with error=" + capturedError
+                    + " instead of a code (state=" + capturedState + ")");
+        }
         if (capturedCode == null) {
             throw new FlowException("Flow did not reach the client callback (ended at " + response.uri()
                     + ", HTTP " + response.statusCode() + ")");
@@ -271,10 +287,10 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
     }
 
     /**
-     * Drives a {@link InteractiveFlow#driveFrom(String, String, String) link-driven} flow from its start
-     * link to a terminal. Skips {@code /authorize}/PKCE/token: the flow was already started by a
+     * Drives a {@link InteractiveFlow#driveFrom(String, String) link-driven} flow from its start link to
+     * its return URL. Skips {@code /authorize}/PKCE/token: the flow was already started by a
      * server-initiated endpoint, so this only follows the browser from {@code startUrl} until it reaches
-     * the flow's success or cancel URL.
+     * the return URL, whose parameters say how the flow ended.
      */
     FlowResult drive(InteractiveFlow flow) {
         if (baseUrl == null) {
@@ -282,11 +298,10 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
                     "Registry is not attached to a container; call SympauthyContainer.withFlows(registry) first");
         }
         if (flow.startUrl == null) {
-            throw new IllegalStateException("Call driveFrom(startUrl, successUrl, cancelUrl) before drive()");
+            throw new IllegalStateException("Call driveFrom(startUrl, returnUrl) before drive()");
         }
         requireInternal("start", flow.startUrl);
-        requireInternal("success", flow.successUrl);
-        requireInternal("cancel", flow.cancelUrl);
+        requireInternal("return", flow.returnUrl);
 
         active = flow;
         flow.steps.clear();
@@ -298,13 +313,11 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         HttpClient apiClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
         this.api = new FlowApiClient(baseUrl, apiClient);
 
-        HttpClient browser = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
-        HttpResponse<String> response = send(browser,
-                HttpRequest.newBuilder(URI.create(flow.startUrl)).GET().build());
+        HttpResponse<String> response = browse(flow.startUrl);
 
         throwFailure();
         if (outcome == null) {
-            throw new FlowException("Flow did not reach the success or cancel URL (ended at " + response.uri()
+            throw new FlowException("Flow did not reach the return URL (ended at " + response.uri()
                     + ", HTTP " + response.statusCode() + ")");
         }
         return new FlowResult(outcome, terminalUrl, terminalParams, flow.stepTypes());
@@ -332,7 +345,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         String state = queryParam(query, "state");
         String name = path.startsWith("/") ? path.substring(1) : path;
         try {
-            // A link-driven flow ends when the browser lands on its success or cancel URL, whatever the path.
+            // A link-driven flow ends when the browser lands on its return URL, whatever the path.
             InteractiveFlow current = active;
             if (current != null && current.startUrl != null && captureTerminal(exchange, current, path, query)) {
                 return;
@@ -349,6 +362,7 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
                 case "callback" -> {
                     capturedCode = queryParam(query, "code");
                     capturedState = queryParam(query, "state");
+                    capturedError = queryParam(query, "error");
                     respond(exchange, 200, "ok");
                 }
                 case "error" -> {
@@ -429,8 +443,13 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
                     + resource.action() + ") but no withConfirmHandler(...) was configured");
         }
         if (active.confirmHandler.decide(resource) == ConfirmDecision.CANCEL) {
+            if (resource.cancelUrl() == null) {
+                throw new FlowException("The confirm handler declined, but the confirm step offers no"
+                        + " cancel_url: the server offers no way out of this step");
+            }
             emit(FlowStep.Type.CANCEL, Map.of());
-            return requireRedirect(api.cancel(state), "cancel");
+            // The browser leaves through the server, which redirects it to wherever the session hands back.
+            return resource.cancelUrl();
         }
         return requireRedirect(api.confirm(state), "confirm");
     }
@@ -481,17 +500,26 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
 
     private boolean captureTerminal(HttpExchange exchange, InteractiveFlow flow, String path, String query)
             throws IOException {
-        FlowOutcome reached;
-        if (path.equals(pathOf(flow.successUrl))) {
-            reached = FlowOutcome.SUCCESS;
-        } else if (path.equals(pathOf(flow.cancelUrl))) {
-            reached = FlowOutcome.CANCELED;
-        } else {
+        if (!path.equals(pathOf(flow.returnUrl))) {
             return false;
         }
-        outcome = reached;
+        Map<String, String> params = queryParams(query);
+        if (!params.containsKey(FLOW_PARAM)) {
+            failure = new FlowException("Flow reached the return URL without " + FLOW_PARAM
+                    + ", so not through SympAuthy's hand-back: " + (query == null ? path : path + "?" + query));
+            respond(exchange, 200, "ok");
+            return true;
+        }
+        String flowError = params.get(FLOW_ERROR_PARAM);
+        if (flowError == null) {
+            outcome = FlowOutcome.SUCCESS;
+        } else if (flowError.equals(CANCELLED_FLOW_ERROR)) {
+            outcome = FlowOutcome.CANCELED;
+        } else {
+            outcome = FlowOutcome.FAILED;
+        }
         terminalUrl = query == null ? path : path + "?" + query;
-        terminalParams = queryParams(query);
+        terminalParams = params;
         respond(exchange, 200, "ok");
         return true;
     }
@@ -573,6 +601,28 @@ public final class InteractiveFlowRegistry implements AutoCloseable {
         active.steps.add(step);
         if (active.stepListener != null) {
             active.stepListener.onStep(step);
+        }
+    }
+
+    /**
+     * GETs {@code url} as a browser would, following every redirect until a page answers without one. The
+     * JDK client follows only a handful of redirects on its own, fewer than a flow with a few pages and a
+     * decline takes, so the redirects are followed here, up to {@link #MAX_REDIRECTS}.
+     */
+    private static HttpResponse<String> browse(String url) {
+        HttpClient browser = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+        URI uri = URI.create(url);
+        for (int redirects = 0; ; redirects++) {
+            HttpResponse<String> response = send(browser, HttpRequest.newBuilder(uri).GET().build());
+            String location = response.headers().firstValue("Location").orElse(null);
+            if (response.statusCode() / 100 != 3 || location == null) {
+                return response;
+            }
+            if (redirects == MAX_REDIRECTS) {
+                throw new FlowException("Flow redirected more than " + MAX_REDIRECTS + " times (last at "
+                        + uri + ")");
+            }
+            uri = uri.resolve(location);
         }
     }
 

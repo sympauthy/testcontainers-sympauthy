@@ -68,11 +68,6 @@ public final class FlowApiClient {
         return post("/api/v1/flow/confirm", state);
     }
 
-    /** {@code POST /api/v1/flow/cancel} (bodyless): cancels the flow. */
-    public FlowResponse cancel(String state) {
-        return post("/api/v1/flow/cancel", state);
-    }
-
     /** {@code GET /api/v1/flow/mfa/enrollment}: the enrollable MFA methods (or an auto-redirect to one). */
     public FlowResponse getMfaEnrollment(String state) {
         return get("/api/v1/flow/mfa/enrollment", state);
